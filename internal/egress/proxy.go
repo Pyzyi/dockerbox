@@ -236,13 +236,7 @@ func (p *Proxy) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	// When either side ends, both connections are closed by the defers above, so
 	// a half-open peer can never pin a connection slot forever.
-	clientSide := &idleConn{Conn: client, peer: upstream, timeout: p.idleTimeout}
-	upstreamSide := &idleConn{Conn: upstream, peer: client, timeout: p.idleTimeout}
-	clientSide.touch()
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(upstream, clientSide); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(client, upstreamSide); done <- struct{}{} }()
-	<-done
+	p.splice(client, upstream)
 }
 
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request) {

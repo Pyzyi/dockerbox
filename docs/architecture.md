@@ -76,6 +76,10 @@ flowchart LR
 * Resolves the destination itself and dials the *checked* IP address
   (prevents DNS rebinding), denies loopback, RFC 1918, link-local, CGNAT,
   ULA, multicast, documentation and other special-purpose ranges.
+* Programs that ignore `HTTP(S)_PROXY` still work: inside a box every name
+  resolves to the proxy (small DNS responder on port 53), which forwards
+  direct connections on ports 443 and 80 using the TLS server name or the HTTP
+  `Host` header, with exactly the same checks. TLS is passed through unchanged.
 * Optional allow-list (`DOCKERBOX_EGRESS_ALLOW_CIDRS`) for deliberate LAN
   services such as a local Ollama instance.
 

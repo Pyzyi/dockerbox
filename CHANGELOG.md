@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.6] - 2026-10-30
+
+### Fixed
+
+- Programs that ignore `HTTP_PROXY`/`HTTPS_PROXY` (for example the Bun-based
+  rabbit agent, whose WebSocket connected directly) can now reach the
+  Internet. Inside a box every name resolves to the egress proxy, which
+  forwards direct connections on ports 443 and 80 by TLS server name or HTTP
+  `Host`, with the same rules as before: host, LAN and other boxes stay
+  unreachable. The proxy starts as root only to open these ports and then
+  drops all privileges.
+- Cron jobs run inside boxes. Debian's cron requires `pam_loginuid`, which a
+  container cannot use, so it silently dropped every job (including
+  `@reboot` entries that installers use to start agents).
+
+Update the app (new `docker-compose.yml`), then "Re-create from image" for
+existing boxes.
+
 ## [1.0.5] - 2026-10-30
 
 ### Added

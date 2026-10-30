@@ -27,7 +27,7 @@ Cheat Sheet, plus empirical checks against a real Docker Engine (29.x).
 | F12 | Low | `latest` image tags break reproducibility and ZimaOS app store guidelines. | Compose pins versioned tags; release workflow publishes semver tags. |
 | F13 | Low | Agents lose installed packages and data when the image is updated. | `/root` and `/workspace` as named volumes; "recreate" action keeps them. |
 | F14 | Low | Docker SDK pulls in a large dependency tree. | Raw Engine API client ([ADR 0004](../adr/0004-go-single-binary-and-minimal-dependencies.md)). |
-| F15 | Info | Services themselves should be hardened (CIS 5.12, 5.25). | All three services: `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, memory/PID limits, healthchecks; web and egress run as non-root. |
+| F15 | Info | Services themselves should be hardened (CIS 5.12, 5.25). | All three services: `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, memory/PID limits, healthchecks; web and egress run as non-root (they start as root only for `chown` / low ports and then drop all privileges). |
 | F16 | Info | Repository will be public; personal data must not leak (R8). | Generic copyright holder, no hostnames/IPs/e-mails in examples, gitleaks in CI, commits authored with no-reply identities. |
 
 ## Findings during implementation
@@ -104,6 +104,8 @@ All findings below were fixed with tests unless marked as documented.
 | Z4 | High (availability) | ZimaOS rejects socket files inside app volumes when settings are saved. | Back to the compose network; broker API requires a 256-bit token instead; data under `/DATA/AppData/dockerbox`. |
 
 | Z5 | High (availability) | ZimaOS runs the services on Docker's default bridge: the name `broker` does not resolve. | Broker publishes its address in the shared data directory and attaches web to its network if needed; CI runs all integration tests with this layout. |
+
+| Z6 | High (availability) | Field test: an agent (Bun runtime) used the proxy for HTTP requests but opened its WebSocket directly, which boxes cannot do; the device stayed offline. Its installer also relied on cron, which drops all jobs in containers (`pam_loginuid`). | Boxes resolve every name to the egress proxy, which forwards direct connections on 443/80 by SNI / `Host` with the same policy (threat I7); `pam_loginuid` set to optional before services start. |
 
 ## Performance review (ZimaBoard 2, N150, 8–16 GiB)
 

@@ -288,6 +288,11 @@ systemctl daemon-reload && systemctl enable --now it-svc`)
 		if got := mustExec(t, "it-alpha", "systemctl is-active it-svc"); got != "active" {
 			t.Fatalf("service not active: %q", got)
 		}
+		// cron drops every job while pam_loginuid is "required" in a container
+		mustExec(t, "it-alpha", "mkdir -p /etc/pam.d && printf 'session    required     pam_loginuid.so\\n' > /etc/pam.d/it-cron && systemctl restart it-svc")
+		if got := mustExec(t, "it-alpha", "cat /etc/pam.d/it-cron"); !strings.Contains(got, "optional") {
+			t.Fatalf("pam_loginuid not relaxed for services: %q", got)
+		}
 		if code, body := c.call("POST", "/api/agents/it-alpha/restart", nil); code != 200 {
 			t.Fatalf("restart: %d %s", code, body)
 		}
@@ -303,6 +308,30 @@ systemctl daemon-reload && systemctl enable --now it-svc`)
 			time.Sleep(300 * time.Millisecond)
 		}
 		mustExec(t, "it-alpha", "systemctl disable --now it-svc && ! systemctl is-active -q it-svc")
+	})
+
+	t.Run("direct connections go through the egress proxy", func(t *testing.T) {
+		// every name resolves to the proxy, so programs ignoring HTTP(S)_PROXY still get out
+		egressIP := mustExec(t, "it-alpha", "getent ahostsv4 dockerbox-egress | awk 'NR==1{print $1}'")
+		if got := mustExec(t, "it-alpha", "getent ahostsv4 os3.example.com | awk 'NR==1{print $1}'"); got != egressIP || got == "" {
+			t.Fatalf("names resolve to %q, want the egress proxy %q", got, egressIP)
+		}
+		// same policy as the proxy: a name resolving to a private address is refused
+		out, _ := dockerExec(t, "it-alpha", `exec 3<>/dev/tcp/dockerbox-egress/80 && printf 'GET / HTTP/1.1\r\nHost: dockerbox-egress\r\nConnection: close\r\n\r\n' >&3 && timeout 10 cat <&3`)
+		if out != "" {
+			t.Fatalf("direct HTTP to a private destination was forwarded: %q", out)
+		}
+		// Internet via direct HTTP and TLS, when the test host has Internet access
+		if via := proxyStatus(t, "it-alpha", "example.com:443"); !strings.Contains(via, " 200 ") {
+			t.Skipf("no Internet access through the proxy (%q); skipping the positive check", via)
+		}
+		out = mustExec(t, "it-alpha", `exec 3<>/dev/tcp/example.com/80 && printf 'HEAD / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n' >&3 && timeout 20 head -n1 <&3`)
+		if !strings.HasPrefix(out, "HTTP/1.1 ") {
+			t.Fatalf("direct HTTP failed: %q", out)
+		}
+		if _, err := dockerExec(t, "it-alpha", "command -v curl"); err == nil {
+			mustExec(t, "it-alpha", "env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy curl -fsS -o /dev/null --max-time 20 https://example.com/")
+		}
 	})
 
 	t.Run("idle box is cheap", func(t *testing.T) {
@@ -381,10 +410,11 @@ func TestBrokerNotReachableFromOutside(t *testing.T) {
 	}
 }
 
-func TestWebRunsUnprivilegedAndOwnsData(t *testing.T) {
-	// The web service starts as root only to fix ownership of a root-owned
-	// /data directory (ZimaOS) and must then run as uid 65532.
-	id := strings.Fields(docker(t, "ps", "-q", "--filter", "label=dockerbox.role=web", "--filter", "label=dockerbox.instance=it"))[0]
+// assertUnprivileged checks that the main process of a service runs as uid
+// 65532 without capabilities (services that start as root must drop them).
+func assertUnprivileged(t *testing.T, role string) {
+	t.Helper()
+	id := strings.Fields(docker(t, "ps", "-q", "--filter", "label=dockerbox.role="+role, "--filter", "label=dockerbox.instance=it"))[0]
 	pid := docker(t, "inspect", "-f", "{{.State.Pid}}", id)
 	status, err := os.ReadFile("/proc/" + pid + "/status")
 	if err != nil {
@@ -397,13 +427,24 @@ func TestWebRunsUnprivilegedAndOwnsData(t *testing.T) {
 			// real, effective, saved, filesystem IDs
 			for _, v := range f[1:] {
 				if v != "65532" {
-					t.Fatalf("web process %s, want 65532 everywhere", line)
+					t.Fatalf("%s process %s, want 65532 everywhere", role, line)
 				}
 			}
 		case len(f) == 2 && f[0] == "CapEff:" && f[1] != "0000000000000000":
-			t.Fatalf("web process still has capabilities: %s", line)
+			t.Fatalf("%s process still has capabilities: %s", role, line)
 		}
 	}
+}
+
+// The egress proxy starts as root only to open ports 53/80/443.
+func TestEgressRunsUnprivileged(t *testing.T) {
+	assertUnprivileged(t, "egress")
+}
+
+func TestWebRunsUnprivilegedAndOwnsData(t *testing.T) {
+	// The web service starts as root only to fix ownership of a root-owned
+	// /data directory (ZimaOS) and must then run as uid 65532.
+	assertUnprivileged(t, "web")
 	dir := os.Getenv("IT_DATA_DIR")
 	if dir == "" {
 		t.Skip("IT_DATA_DIR not set")

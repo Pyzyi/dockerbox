@@ -113,6 +113,10 @@ func serve(ctx context.Context, srv *http.Server, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	return serveOn(ctx, srv, l, log)
+}
+
+func serveOn(ctx context.Context, srv *http.Server, l net.Listener, log *slog.Logger) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
 	log.Info("listening", "addr", srv.Addr, "version", version)
@@ -123,7 +127,7 @@ func serve(ctx context.Context, srv *http.Server, log *slog.Logger) error {
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err = srv.Shutdown(sctx)
+	err := srv.Shutdown(sctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return srv.Close()
 	}
@@ -286,12 +290,13 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 
 func runEgress(ctx context.Context, log *slog.Logger) error {
 	e := envconf.New()
-	listen := e.String("DOCKERBOX_EGRESS_LISTEN", ":3128")
+	addr := e.String("DOCKERBOX_EGRESS_LISTEN", ":3128")
 	allow := e.List("DOCKERBOX_EGRESS_ALLOW_CIDRS")
 	deny := e.List("DOCKERBOX_EGRESS_DENY_CIDRS")
 	maxConns := e.Int("DOCKERBOX_EGRESS_MAX_CONNECTIONS", 512)
 	maxPerAgent := e.Int("DOCKERBOX_EGRESS_MAX_PER_AGENT", 64)
 	idle := e.Duration("DOCKERBOX_EGRESS_IDLE_TIMEOUT", 15*time.Minute)
+	transparent := e.Bool("DOCKERBOX_EGRESS_TRANSPARENT", true)
 	var ports []int
 	for _, p := range e.List("DOCKERBOX_EGRESS_ALLOWED_PORTS") {
 		n, err := strconv.Atoi(p)
@@ -312,10 +317,67 @@ func runEgress(ctx context.Context, log *slog.Logger) error {
 		log.Warn("egress allow-list active: agents can reach these private ranges", "cidrs", allow)
 	}
 	p := egress.New(egress.Options{Filter: filter, MaxConnections: maxConns, MaxPerClient: maxPerAgent, IdleTimeout: idle, Logger: log})
-	return serve(ctx, &http.Server{
-		Addr: listen, Handler: p,
+	srv := &http.Server{
+		Addr: addr, Handler: p,
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
-	}, log)
+	}
+	l, err := listen(srv.Addr)
+	if err != nil {
+		return err
+	}
+	startDirect := func() {}
+	if transparent {
+		startDirect = openTransparent(ctx, p, log)
+	}
+	// The low ports above need root (or CAP_NET_BIND_SERVICE); serve unprivileged.
+	if os.Geteuid() == 0 {
+		if err := privdrop.Drop(privdrop.UID, privdrop.GID); err != nil {
+			return fmt.Errorf("drop privileges: %w", err)
+		}
+	}
+	startDirect()
+	return serveOn(ctx, srv, l, log)
+}
+
+// openTransparent opens the DNS, TLS and HTTP listeners that catch programs
+// ignoring HTTP(S)_PROXY and returns a function that starts serving them.
+// Without the permission for low ports it only warns.
+func openTransparent(ctx context.Context, p *egress.Proxy, log *slog.Logger) func() {
+	pc, err := net.ListenPacket("udp", ":53")
+	if err != nil {
+		log.Warn("direct connections from boxes are not forwarded (cannot open port 53)", "err", err)
+		return func() {}
+	}
+	tlsL, err := net.Listen("tcp", ":443")
+	if err != nil {
+		pc.Close()
+		log.Warn("direct connections from boxes are not forwarded (cannot open port 443)", "err", err)
+		return func() {}
+	}
+	httpL, err := net.Listen("tcp", ":80")
+	if err != nil {
+		pc.Close()
+		tlsL.Close()
+		log.Warn("direct connections from boxes are not forwarded (cannot open port 80)", "err", err)
+		return func() {}
+	}
+	return func() { serveTransparent(ctx, p, pc, tlsL, httpL, log) }
+}
+
+func serveTransparent(ctx context.Context, p *egress.Proxy, pc net.PacketConn, tlsL, httpL net.Listener, log *slog.Logger) {
+	dns := &egress.DNSServer{}
+	go func() { _ = dns.Serve(ctx, pc) }()
+	go func() {
+		if err := p.ServeTransparent(ctx, tlsL, egress.ModeTLS, 443); err != nil {
+			log.Error("transparent TLS listener stopped", "err", err)
+		}
+	}()
+	go func() {
+		if err := p.ServeTransparent(ctx, httpL, egress.ModeHTTP, 80); err != nil {
+			log.Error("transparent HTTP listener stopped", "err", err)
+		}
+	}()
+	log.Info("forwarding direct connections from boxes", "dns", ":53", "tls", ":443", "http", ":80")
 }
 
 // waitForFile returns the trimmed content of path, waiting while the broker

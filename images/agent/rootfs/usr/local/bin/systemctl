@@ -151,6 +151,18 @@ is_enabled() {
 
 # ---------------------------------------------------------------- actions
 
+# container_fixups adapts packages to the box before services start.
+# pam_loginuid cannot write the audit login uid in a container; as "required"
+# it makes cron silently drop every job (also @reboot entries of installers).
+container_fixups() {
+	local f
+	for f in /etc/pam.d/*; do
+		[[ -f $f ]] && grep -qE '^[[:space:]]*session[[:space:]]+required[[:space:]]+pam_loginuid\.so' "$f" &&
+			sed -i -E 's/^([[:space:]]*session[[:space:]]+)required([[:space:]]+pam_loginuid\.so)/\1optional\2/' "$f"
+	done
+	return 0
+}
+
 supervise() { # runs detached in its own session; pid file = this process
 	local unit=$1 file child code restart pre
 	file=$(find_unit "$unit") || exit 1
@@ -187,6 +199,7 @@ start_unit() {
 	[[ $unit == *.service ]] || { note "Note: $unit is not a service; nothing to start."; return 0; }
 	file=$(find_unit "$unit" "$scope") || { echo "Failed to start $unit: Unit $unit not found." >&2; return 5; }
 	is_running "$unit" && return 0
+	container_fixups
 	parse_unit "$file"
 	if ((${#U_EXEC_START[@]} == 0)); then
 		echo "Failed to start $unit: no ExecStart= in $file" >&2

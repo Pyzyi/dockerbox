@@ -23,7 +23,43 @@ fi
 
 mkdir -p /workspace
 
+# Programs that ignore HTTP(S)_PROXY (e.g. some WebSocket clients) would fail:
+# boxes have no route to the Internet. Every name therefore resolves to the
+# egress proxy, which forwards such direct connections on ports 443 and 80
+# with the same checks. Docker's own resolver is kept to find the proxy.
+DOCKER_RESOLV=/run/dockerbox-resolv.conf
+MANAGED="# managed by dockerbox: names resolve to the egress proxy"
+point_dns_to_egress() {
+  [ -s "$DOCKER_RESOLV" ] || return 0
+  cp "$DOCKER_RESOLV" /etc/resolv.conf
+  ip=$(getent ahostsv4 dockerbox-egress | awk 'NR==1{print $1}')
+  [ -n "$ip" ] || return 0
+  printf '%s\nnameserver %s\noptions timeout:2 attempts:2\n' "$MANAGED" "$ip" > /etc/resolv.conf
+  # An egress without DNS (older version, or disabled): keep Docker's resolver.
+  egress_dns_ok || cp "$DOCKER_RESOLV" /etc/resolv.conf
+}
+egress_dns_ok() {
+  getent ahostsv4 dockerbox-egress >/dev/null 2>&1
+}
+DIRECT=0
+if [ -n "${HTTP_PROXY:-}" ] && cp /etc/resolv.conf "$DOCKER_RESOLV" 2>/dev/null; then
+  DIRECT=1
+  point_dns_to_egress || true
+fi
+
 # Start services that were enabled with "systemctl enable" (dockerbox replacement).
 /usr/local/bin/systemctl __boot || true
 
-exec sleep infinity
+# Idle at ~0 CPU. Every minute, check that the proxy still answers names
+# (its address changes when the app is updated) and re-point if needed.
+trap 'exit 0' TERM INT
+while :; do
+  sleep 60 &
+  wait $!
+  [ "$DIRECT" = 1 ] || continue
+  if grep -qF "$MANAGED" /etc/resolv.conf; then
+    egress_dns_ok || point_dns_to_egress || true
+  elif cmp -s /etc/resolv.conf "$DOCKER_RESOLV"; then
+    point_dns_to_egress || true # egress was not ready yet; left alone if you edited the file
+  fi
+done

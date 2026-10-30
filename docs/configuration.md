@@ -62,6 +62,7 @@ the compose project name and port.
 | `DOCKERBOX_EGRESS_MAX_PER_AGENT` | `64` | Concurrent proxy connections per box, so one box cannot starve the others. |
 | `DOCKERBOX_EGRESS_IDLE_TIMEOUT` | `15m` | Tunnels without traffic in either direction are closed after this time. |
 | `DOCKERBOX_EGRESS_DENY_CIDRS` | empty | Comma-separated **public** addresses boxes must not reach. Set this to the server's own public/WAN IP if it has one (VPS, router with NAT hairpinning), otherwise agents could reach services the server publishes on that IP. Wins over the allow-list. |
+| `DOCKERBOX_EGRESS_TRANSPARENT` | `true` | Forward direct connections of programs that ignore the proxy settings (DNS on port 53, TLS on 443, HTTP on 80; needs the `cap_add` of the published compose file). `false` turns it off; such programs then cannot connect. |
 | `DOCKERBOX_EGRESS_MAX_CONNECTIONS` | `512` | Concurrent connections through the proxy. |
 | `DOCKERBOX_EGRESS_LISTEN` | `:3128` | Listen address. |
 
