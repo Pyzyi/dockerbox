@@ -25,6 +25,7 @@ settings.
 | `DOCKERBOX_SECURE_COOKIE` | `auto` | `auto` sets the `Secure` flag when served over HTTPS (also via `X-Forwarded-Proto`); `true`/`false` to force. |
 | `DOCKERBOX_BROKER_URL` | `http://broker:8081` | Broker address (compose service name). |
 | `DOCKERBOX_BROKER_TOKEN_FILE` | `/run/dockerbox/broker.token` | API token created by the broker; web reads it at start. |
+| `DOCKERBOX_BROKER_ADDR_FILE` | `/run/dockerbox/broker.addr` | Address the broker publishes (needed on ZimaOS, where service names do not resolve); used instead of `DOCKERBOX_BROKER_URL` when present. |
 | `DOCKERBOX_LISTEN` | `:8080` | Listen address inside the container. |
 | `DOCKERBOX_DATA_DIR` | `/data` | Where the generated password and session key are stored. |
 

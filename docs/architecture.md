@@ -60,6 +60,9 @@ flowchart LR
 * The only component with access to `/var/run/docker.sock`.
 * Not reachable from the browser or from agents; its port is not published
   and every API call needs a random token that only `web` knows.
+* Publishes its own address in a file shared with `web` and attaches `web` to
+  its network if they share none (ZimaOS runs services on Docker's default
+  bridge, where service names do not resolve).
 * Does **not** forward raw Docker API calls. It builds every container, network
   and volume definition itself from a fixed template and validates the result
   against an explicit policy (`internal/broker/policy.go`) before sending it to

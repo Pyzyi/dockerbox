@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -702,4 +704,77 @@ func (s *Service) RunReconciler(ctx context.Context, every time.Duration) {
 		case <-t.C:
 		}
 	}
+}
+
+// Advertise makes sure web can reach the broker and publishes the broker's
+// address in a file shared with web. Platforms like ZimaOS run compose
+// services on Docker's default bridge, where service names do not resolve,
+// so web cannot rely on the name "broker". If web and broker share no
+// network, web is attached to the broker's network.
+func (s *Service) Advertise(ctx context.Context, port int, path string) error {
+	all, err := s.engine.ContainerList(ctx, nil)
+	if err != nil {
+		return err
+	}
+	var self, web *dockerapi.ContainerSummary
+	for i, c := range all {
+		if len(s.cfg.SelfID) >= 12 && strings.HasPrefix(c.ID, s.cfg.SelfID) {
+			self = &all[i]
+		}
+	}
+	if self == nil {
+		return errors.New("own container not found")
+	}
+	project := self.Labels[composeProject]
+	for i, c := range all {
+		isWeb := c.Labels[LabelRole] == "web" && c.Labels[LabelInstance] == s.cfg.Instance
+		isComposeWeb := project != "" && c.Labels[composeProject] == project && c.Labels[composeService] == "web"
+		if (isWeb || isComposeWeb) && c.State == "running" {
+			web = &all[i]
+			break
+		}
+	}
+	nets := slices.Sorted(maps.Keys(self.NetworkSettings.Networks))
+	if len(nets) == 0 {
+		return errors.New("broker has no network")
+	}
+	chosen := nets[0]
+	if web != nil && web.HostConfig.NetworkMode != "host" {
+		shared := ""
+		for _, n := range nets {
+			if _, ok := web.NetworkSettings.Networks[n]; ok {
+				shared = n
+				break
+			}
+		}
+		if shared == "" {
+			id := self.NetworkSettings.Networks[chosen].NetworkID
+			if id == "" {
+				id = chosen
+			}
+			if err := s.engine.NetworkConnect(ctx, id, web.ID, nil); err != nil && !alreadyAttached(err) {
+				return fmt.Errorf("attach web to %s: %w", chosen, err)
+			}
+			s.log.Info("attached web to the broker network", "network", chosen)
+			shared = chosen
+		}
+		chosen = shared
+	}
+	ip := self.NetworkSettings.Networks[chosen].IPAddress
+	if ip == "" {
+		return fmt.Errorf("broker has no address on %s", chosen)
+	}
+	addr := "http://" + net.JoinHostPort(ip, strconv.Itoa(port)) + "\n"
+	if old, err := os.ReadFile(path); err == nil && string(old) == addr {
+		return nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(addr), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	s.log.Info("broker address published", "addr", strings.TrimSpace(addr))
+	return nil
 }

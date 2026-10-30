@@ -1,0 +1,9 @@
+# Simulates how ZimaOS runs the app: every service on Docker's default
+# bridge, where compose service names do not resolve. Used with IT_ZIMAOS=1.
+services:
+  web:
+    network_mode: bridge
+  broker:
+    network_mode: bridge
+  egress:
+    network_mode: bridge

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -29,8 +30,11 @@ type Config struct {
 	BrokerURL    *url.URL
 	BrokerSocket string // if set, the broker is reached over this unix socket
 	BrokerToken  string // shared secret sent as bearer token to the broker
-	SessionTTL   time.Duration
-	SecureCookie string // "auto", "true" or "false"
+	// BrokerAddrFile, if set, holds the broker's current "http://ip:port",
+	// published by the broker itself. It is read on every new connection.
+	BrokerAddrFile string
+	SessionTTL     time.Duration
+	SecureCookie   string // "auto", "true" or "false"
 }
 
 // Server is the dashboard HTTP server.
@@ -55,7 +59,7 @@ func NewServer(cfg Config, auth *Auth, settings *SettingsStore, log *slog.Logger
 		cfg: cfg, auth: auth, settings: settings, log: log,
 		limiter: newLoginLimiter(10, 15*time.Minute),
 		broker: &http.Client{Timeout: 16 * time.Minute, Transport: &authTransport{
-			token: cfg.BrokerToken, next: brokerTransport(cfg.BrokerSocket)}},
+			token: cfg.BrokerToken, next: brokerTransport(cfg)}},
 		static: http.FileServerFS(sub),
 		now:    time.Now,
 	}
@@ -95,20 +99,39 @@ func (t *authTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return t.next.RoundTrip(r)
 }
 
-// brokerTransport returns the HTTP transport to the broker: a unix socket when
-// configured, the default transport otherwise.
-func brokerTransport(socket string) http.RoundTripper {
-	if socket == "" {
+// brokerTransport returns the HTTP transport to the broker.
+func brokerTransport(cfg Config) http.RoundTripper {
+	if cfg.BrokerSocket == "" && cfg.BrokerAddrFile == "" {
 		return http.DefaultTransport
 	}
 	return &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socket)
+			return dialBroker(ctx, cfg)
 		},
 		MaxIdleConns:    8,
 		IdleConnTimeout: 30 * time.Second,
 	}
+}
+
+// dialBroker connects to the broker: unix socket, the address the broker
+// published in BrokerAddrFile, or BrokerURL's host.
+func dialBroker(ctx context.Context, cfg Config) (net.Conn, error) {
+	var d net.Dialer
+	if cfg.BrokerSocket != "" {
+		return d.DialContext(ctx, "unix", cfg.BrokerSocket)
+	}
+	addr := cfg.BrokerURL.Host
+	if cfg.BrokerURL.Port() == "" {
+		addr = net.JoinHostPort(cfg.BrokerURL.Hostname(), "80")
+	}
+	if cfg.BrokerAddrFile != "" {
+		if b, err := os.ReadFile(cfg.BrokerAddrFile); err == nil {
+			if u, err := url.Parse(strings.TrimSpace(string(b))); err == nil && u.Scheme == "http" && u.Port() != "" {
+				addr = u.Host
+			}
+		}
+	}
+	return d.DialContext(ctx, "tcp", addr)
 }
 
 func securityHeaders(next http.Handler) http.Handler {

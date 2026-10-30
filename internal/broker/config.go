@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Listen          string
 	TokenFile       string
+	AddrFile        string
 	DockerSocket    string
 	Instance        string
 	AgentImage      string
@@ -40,6 +41,7 @@ func LoadConfig(defaultImage string) (*Config, error) {
 	c := &Config{
 		Listen:          e.String("DOCKERBOX_BROKER_LISTEN", ":8081"),
 		TokenFile:       e.String("DOCKERBOX_BROKER_TOKEN_FILE", "/run/dockerbox/broker.token"),
+		AddrFile:        e.String("DOCKERBOX_BROKER_ADDR_FILE", "/run/dockerbox/broker.addr"),
 		DockerSocket:    e.String("DOCKERBOX_DOCKER_SOCKET", "/var/run/docker.sock"),
 		Instance:        e.String("DOCKERBOX_INSTANCE", "default"),
 		AgentImage:      e.String("DOCKERBOX_AGENT_IMAGE", defaultImage),

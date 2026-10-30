@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] - 2026-10-30
+
+### Fixed
+
+- ZimaOS: "broker unreachable" - ZimaOS runs the app's containers on Docker's
+  default bridge, where the service name `broker` does not resolve. The broker
+  now finds its own and the dashboard's network, attaches the dashboard to its
+  network if needed, and publishes its address in
+  `/DATA/AppData/dockerbox/broker/broker.addr`; the dashboard connects to that
+  address. CI and releases now also run all integration tests with the ZimaOS
+  network layout.
+
 ## [1.0.2] - 2026-10-30
 
 ### Fixed
@@ -59,6 +71,7 @@ First public release.
   govulncheck, Trivy, gitleaks; automatic multi-arch releases with SBOM and
   provenance; ISO/IEC 25010 quality model, threat model and design audit.
 
+[1.0.3]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.3
 [1.0.2]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.0

@@ -61,6 +61,9 @@ jobs:
       - run: make vuln
       - run: make images VERSION=release
       - run: make it VERSION=release
+      - run: make it VERSION=release
+        env:
+          IT_ZIMAOS: "1"
 
   images:
     name: Publish ${{ matrix.name }}

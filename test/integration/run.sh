@@ -15,6 +15,10 @@ IT_DATA_DIR="$IT_PARENT/data"
 mkdir "$IT_DATA_DIR"
 export IT_DATA_DIR
 compose=(docker compose -p "$project" -f docker-compose.yml -f test/integration/compose.override.yml)
+#   IT_ZIMAOS=1                run all services on Docker's default bridge, like ZimaOS
+if [[ "${IT_ZIMAOS:-0}" == "1" ]]; then
+  compose+=(-f test/integration/zimaos.override.yml)
+fi
 
 if [[ "${IT_BUILD:-0}" == "1" ]]; then
   docker build -t "${IT_IMAGE:-dockerbox:dev}" --build-arg AGENT_IMAGE="${IT_AGENT_IMAGE:-dockerbox-agent:dev}" .

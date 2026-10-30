@@ -88,6 +88,10 @@ jobs:
         run: make it VERSION=ci
         env:
           IT_INTERNET: "1"
+      - name: Integration tests with the ZimaOS network layout (default bridge)
+        run: make it VERSION=ci
+        env:
+          IT_ZIMAOS: "1"
       - name: Trivy scan (service image)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, pinned by SHA
         with:

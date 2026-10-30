@@ -5,13 +5,25 @@ package dockerapi
 
 // ContainerSummary is an entry of GET /containers/json.
 type ContainerSummary struct {
-	ID      string            `json:"Id"`
-	Names   []string          `json:"Names"`
-	Image   string            `json:"Image"`
-	State   string            `json:"State"`
-	Status  string            `json:"Status"`
-	Created int64             `json:"Created"`
-	Labels  map[string]string `json:"Labels"`
+	ID         string            `json:"Id"`
+	Names      []string          `json:"Names"`
+	Image      string            `json:"Image"`
+	State      string            `json:"State"`
+	Status     string            `json:"Status"`
+	Created    int64             `json:"Created"`
+	Labels     map[string]string `json:"Labels"`
+	HostConfig struct {
+		NetworkMode string `json:"NetworkMode"`
+	} `json:"HostConfig"`
+	NetworkSettings struct {
+		Networks map[string]SummaryNetwork `json:"Networks"`
+	} `json:"NetworkSettings"`
+}
+
+// SummaryNetwork is a network attachment in a container list entry.
+type SummaryNetwork struct {
+	NetworkID string `json:"NetworkID"`
+	IPAddress string `json:"IPAddress"`
 }
 
 // ContainerSpec is the body of POST /containers/create.

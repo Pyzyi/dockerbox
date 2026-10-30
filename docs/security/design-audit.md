@@ -103,6 +103,8 @@ All findings below were fixed with tests unless marked as documented.
 
 | Z4 | High (availability) | ZimaOS rejects socket files inside app volumes when settings are saved. | Back to the compose network; broker API requires a 256-bit token instead; data under `/DATA/AppData/dockerbox`. |
 
+| Z5 | High (availability) | ZimaOS runs the services on Docker's default bridge: the name `broker` does not resolve. | Broker publishes its address in the shared data directory and attaches web to its network if needed; CI runs all integration tests with this layout. |
+
 ## Performance review (ZimaBoard 2, N150, 8–16 GiB)
 
 * Idle cost per agent box: `tini` + `sleep` ≈ 1 MiB RSS, 0 % CPU. tmux only after

@@ -146,6 +146,7 @@ func runBroker(ctx context.Context, log *slog.Logger) error {
 	checkEngine(ctx, engine, cfg, log)
 	svc := broker.NewService(cfg, engine, log)
 	go svc.RunReconciler(ctx, time.Minute)
+	go advertise(ctx, svc, cfg, log)
 
 	token, err := broker.LoadOrCreateToken(cfg.TokenFile)
 	if err != nil {
@@ -157,6 +158,33 @@ func runBroker(ctx context.Context, log *slog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
 	}, log)
 	return err
+}
+
+// advertise keeps the broker address file current (containers can get new
+// addresses after a restart). Fast retries at start, then every 30 s.
+func advertise(ctx context.Context, svc *broker.Service, cfg *broker.Config, log *slog.Logger) {
+	_, portStr, err := net.SplitHostPort(cfg.Listen)
+	port, perr := strconv.Atoi(portStr)
+	if err != nil || perr != nil {
+		log.Warn("broker address not advertised: listen address has no TCP port", "listen", cfg.Listen)
+		return
+	}
+	wait := time.Second
+	for {
+		if err := svc.Advertise(ctx, port, cfg.AddrFile); err != nil {
+			log.Warn("advertise broker address", "err", err)
+		} else {
+			wait = 30 * time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		if wait < 30*time.Second {
+			wait *= 2
+		}
+	}
 }
 
 // checkEngine warns about engine versions with known isolation gaps and keeps
@@ -189,6 +217,7 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 	e := envconf.New()
 	listen := e.String("DOCKERBOX_LISTEN", ":8080")
 	brokerURL := e.String("DOCKERBOX_BROKER_URL", "http://broker:8081")
+	brokerAddrFile := e.String("DOCKERBOX_BROKER_ADDR_FILE", "/run/dockerbox/broker.addr")
 	tokenFile := e.String("DOCKERBOX_BROKER_TOKEN_FILE", "/run/dockerbox/broker.token")
 	dataDir := e.String("DOCKERBOX_DATA_DIR", "/data")
 	ttl := e.Duration("DOCKERBOX_SESSION_TTL", 24*time.Hour)
@@ -248,7 +277,7 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv := web.NewServer(web.Config{BrokerURL: u, BrokerSocket: brokerSocket, BrokerToken: brokerToken, SessionTTL: ttl, SecureCookie: secure}, auth, settings, log)
+	srv := web.NewServer(web.Config{BrokerURL: u, BrokerSocket: brokerSocket, BrokerToken: brokerToken, BrokerAddrFile: brokerAddrFile, SessionTTL: ttl, SecureCookie: secure}, auth, settings, log)
 	return serve(ctx, &http.Server{
 		Addr: listen, Handler: srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,

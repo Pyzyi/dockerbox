@@ -36,6 +36,7 @@ type fakeContainer struct {
 	id, name string
 	spec     *dockerapi.ContainerSpec
 	state    string
+	nets     map[string]dockerapi.SummaryNetwork
 }
 
 func newFakeEngine() *fakeEngine {
@@ -77,7 +78,9 @@ func (f *fakeEngine) ContainerList(_ context.Context, labels []string) ([]docker
 	var out []dockerapi.ContainerSummary
 	for _, c := range f.containers {
 		if matches(c.spec.Labels, labels) {
-			out = append(out, dockerapi.ContainerSummary{ID: c.id, Names: []string{"/" + c.name}, State: c.state, Labels: c.spec.Labels, Image: c.spec.Image})
+			sum := dockerapi.ContainerSummary{ID: c.id, Names: []string{"/" + c.name}, State: c.state, Labels: c.spec.Labels, Image: c.spec.Image}
+			sum.NetworkSettings.Networks = c.nets
+			out = append(out, sum)
 		}
 	}
 	return out, nil
@@ -212,6 +215,12 @@ func (f *fakeEngine) NetworkConnect(_ context.Context, network, container string
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.net(network).Containers[container] = dockerapi.NetworkEndpoint{}
+	if c := f.byID(container); c != nil {
+		if c.nets == nil {
+			c.nets = map[string]dockerapi.SummaryNetwork{}
+		}
+		c.nets[f.net(network).Name] = dockerapi.SummaryNetwork{NetworkID: f.net(network).ID}
+	}
 	return nil
 }
 
@@ -640,5 +649,36 @@ func TestLoadOrCreateToken(t *testing.T) {
 	}
 	if b, _ := LoadOrCreateToken(path); b != a {
 		t.Fatal("token not persisted")
+	}
+}
+
+func TestAdvertiseJoinsWebAndPublishesAddress(t *testing.T) {
+	svc, f := newTestService()
+	svc.cfg.SelfID = "aaaaaaaaaaaa"
+	compose := func(service string) map[string]string {
+		return map[string]string{composeProject: "dockerbox", composeService: service}
+	}
+	f.networks["bridge"] = &dockerapi.NetworkJSON{ID: "n-bridge", Name: "bridge", Containers: map[string]dockerapi.NetworkEndpoint{}}
+	f.containers["broker"] = &fakeContainer{id: "aaaaaaaaaaaa1111", name: "broker", state: "running",
+		spec: &dockerapi.ContainerSpec{Labels: compose("broker")},
+		nets: map[string]dockerapi.SummaryNetwork{"bridge": {NetworkID: "n-bridge", IPAddress: "172.17.0.3"}}}
+	// Like ZimaOS: web ended up on a different network than the broker.
+	f.containers["web"] = &fakeContainer{id: "bbbbbbbbbbbb2222", name: "web", state: "running",
+		spec: &dockerapi.ContainerSpec{Labels: compose("web")},
+		nets: map[string]dockerapi.SummaryNetwork{"other": {NetworkID: "n-other", IPAddress: "10.9.0.2"}}}
+	path := filepath.Join(t.TempDir(), "broker.addr")
+	if err := svc.Advertise(context.Background(), 8081, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.networks["bridge"].Containers["bbbbbbbbbbbb2222"]; !ok {
+		t.Fatal("web was not attached to the broker's network")
+	}
+	b, _ := os.ReadFile(path)
+	if string(b) != "http://172.17.0.3:8081\n" {
+		t.Fatalf("published address %q", b)
+	}
+	// Second run: already shared, nothing to change.
+	if err := svc.Advertise(context.Background(), 8081, path); err != nil {
+		t.Fatal(err)
 	}
 }
