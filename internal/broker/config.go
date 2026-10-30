@@ -12,6 +12,7 @@ import (
 // Config holds the broker settings. All values come from DOCKERBOX_* env vars.
 type Config struct {
 	Listen          string
+	TokenFile       string
 	DockerSocket    string
 	Instance        string
 	AgentImage      string
@@ -37,7 +38,8 @@ type Config struct {
 func LoadConfig(defaultImage string) (*Config, error) {
 	e := envconf.New()
 	c := &Config{
-		Listen:          e.String("DOCKERBOX_BROKER_LISTEN", "unix:///run/dockerbox/broker.sock"),
+		Listen:          e.String("DOCKERBOX_BROKER_LISTEN", ":8081"),
+		TokenFile:       e.String("DOCKERBOX_BROKER_TOKEN_FILE", "/run/dockerbox/broker.token"),
 		DockerSocket:    e.String("DOCKERBOX_DOCKER_SOCKET", "/var/run/docker.sock"),
 		Instance:        e.String("DOCKERBOX_INSTANCE", "default"),
 		AgentImage:      e.String("DOCKERBOX_AGENT_IMAGE", defaultImage),

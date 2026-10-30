@@ -41,9 +41,8 @@ DNS for peers on the same network still works.
   (e.g. `192.168.1.50:11434` for a local LLM server; a bare address opens all ports).
 * Per-box connection cap and tunnel idle timeout keep one box from starving the
   others; an optional port allow-list limits abuse.
-* web and broker do not share a network at all: web reaches the broker over a
-  unix socket in a shared volume, so no process can reach the broker API over
-  the network.
+* The broker API is protected by a random token shared only with web, so
+  other processes on the compose network cannot drive it.
 
 ## Consequences
 

@@ -13,7 +13,9 @@ with `amd64` or `arm64` works the same way.
    password (min. 12 characters). Optional — if you leave it empty, see step 3.
    The web port (default `8420`) can be changed there as well.
 4. Install. ZimaOS pulls the ~17 MB service image and starts three containers:
-   `web`, `broker` and `egress`.
+   `web`, `broker` and `egress`. App data is stored in
+   `/DATA/AppData/dockerbox/` (`data` for the dashboard, `broker` for an
+   internal API token).
 
 ## 2. Open the dashboard
 

@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -592,5 +596,49 @@ func TestEgressFoundByComposeLabels(t *testing.T) {
 	id, err := svc.egressContainer(context.Background())
 	if err != nil || id != "egress-id" {
 		t.Fatalf("egress = %q, %v; want egress-id of the own project", id, err)
+	}
+}
+
+func TestBrokerAPIRequiresToken(t *testing.T) {
+	svc, _ := newTestService()
+	srv := httptest.NewServer(NewServer(svc, testConfig(), "s3cret-token-0123456789abcdef0123", "test", slog.New(slog.DiscardHandler)).Handler())
+	defer srv.Close()
+	get := func(path, auth string) int {
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := get("/healthz", ""); code != http.StatusNoContent {
+		t.Fatalf("healthz must not need a token: %d", code)
+	}
+	for _, auth := range []string{"", "Bearer wrong", "s3cret-token-0123456789abcdef0123"} {
+		if code := get("/v1/agents", auth); code != http.StatusUnauthorized {
+			t.Fatalf("auth %q: %d, want 401", auth, code)
+		}
+	}
+	if code := get("/v1/agents", "Bearer s3cret-token-0123456789abcdef0123"); code != http.StatusOK {
+		t.Fatalf("valid token: %d", code)
+	}
+}
+
+func TestLoadOrCreateToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "broker.token")
+	a, err := LoadOrCreateToken(path)
+	if err != nil || len(a) != 64 {
+		t.Fatalf("token %q, %v", a, err)
+	}
+	st, _ := os.Stat(path)
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("token file mode %v", st.Mode())
+	}
+	if b, _ := LoadOrCreateToken(path); b != a {
+		t.Fatal("token not persisted")
 	}
 }

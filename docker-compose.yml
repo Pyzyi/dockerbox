@@ -16,7 +16,7 @@ name: dockerbox
 
 services:
   web:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.1
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.2
     command: ["web"]
     restart: unless-stopped
     depends_on:
@@ -30,17 +30,16 @@ services:
       # Dashboard password, at least 12 characters. Leave empty to generate one
       # on first start; it is printed once in the log of this container.
       DOCKERBOX_PASSWORD: ""
-      # web talks to the broker over a unix socket in a shared volume, not over
-      # a network: nothing but web can reach the broker.
-      DOCKERBOX_BROKER_URL: unix:///run/dockerbox/broker.sock
       DOCKERBOX_SESSION_TTL: 24h
       TZ: UTC
     volumes:
-      - type: volume
-        source: data
+      # ZimaOS convention: app data under /DATA/AppData/<app>.
+      - type: bind
+        source: /DATA/AppData/dockerbox/data
         target: /data
-      - type: volume
-        source: broker-socket
+      # Holds the broker's API token (a plain file). Only web and broker mount it.
+      - type: bind
+        source: /DATA/AppData/dockerbox/broker
         target: /run/dockerbox
     # Starts as root only to take ownership of /data (ZimaOS creates volume
     # directories as root:root), then permanently switches to uid 65532 and
@@ -86,16 +85,20 @@ services:
           description:
             en_us: Dashboard password, session key and appearance settings
             de_de: Dashboard-Passwort, Sitzungsschlüssel und Darstellungs-Einstellungen
+        - container: /run/dockerbox
+          description:
+            en_us: Internal API token shared by web and broker
+            de_de: Interner API-Schlüssel zwischen web und broker
 
   broker:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.1
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.2
     command: ["broker"]
     restart: unless-stopped
     depends_on:
       egress:
         condition: service_started
     environment:
-      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.1
+      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.2
       # Optional: "runsc" (gVisor) or "sysbox-runc" if installed on the host.
       DOCKERBOX_AGENT_RUNTIME: ""
       DOCKERBOX_MAX_AGENTS: "10"
@@ -104,15 +107,15 @@ services:
       DOCKERBOX_DEFAULT_CPUS: "2"
       DOCKERBOX_MAX_CPUS: "4"
       DOCKERBOX_INSTANCE: default
-      DOCKERBOX_BROKER_LISTEN: unix:///run/dockerbox/broker.sock
     volumes:
-      # The ONLY component with Docker access. Not reachable from the browser,
-      # the host network or agent boxes (internal network shared with web only).
+      # The ONLY component with Docker access. Its API (port 8081, not
+      # published) only answers requests carrying the token shared with web.
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
-      - type: volume
-        source: broker-socket
+      # Holds the broker's API token (a plain file). Only web and broker mount it.
+      - type: bind
+        source: /DATA/AppData/dockerbox/broker
         target: /run/dockerbox
     # Runs as UID 0 solely to open the root-owned socket; all capabilities dropped.
     user: "0:0"
@@ -122,7 +125,7 @@ services:
     mem_limit: 64m
     pids_limit: 64
     healthcheck:
-      test: ["CMD", "/dockerbox", "healthcheck", "unix:///run/dockerbox/broker.sock"]
+      test: ["CMD", "/dockerbox", "healthcheck", "http://127.0.0.1:8081/healthz"]
       interval: 30s
       timeout: 5s
       start_period: 10s
@@ -151,7 +154,7 @@ services:
             de_de: Maximale CPU-Kerne pro Agenten-Box
 
   egress:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.1
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.2
     command: ["egress"]
     restart: unless-stopped
     environment:
@@ -193,9 +196,6 @@ services:
             en_us: "LAN services agents may reach, as ADDR:PORT (e.g. 192.168.1.50:11434). Empty = Internet only."
             de_de: "LAN-Dienste, die Agenten erreichen dürfen, als ADRESSE:PORT (z. B. 192.168.1.50:11434). Leer = nur Internet."
 
-volumes:
-  data: {}
-  broker-socket: {}
 
 x-casaos:
   architectures:

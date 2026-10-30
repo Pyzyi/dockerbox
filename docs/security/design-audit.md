@@ -101,6 +101,8 @@ All findings below were fixed with tests unless marked as documented.
 
 | Z3 | High (availability) | ZimaOS did not connect `web` and `broker` through the custom compose network ("broker unreachable"). | Unix socket in a shared volume instead of a network; no custom networks in the compose file; egress lookup also via compose service labels. |
 
+| Z4 | High (availability) | ZimaOS rejects socket files inside app volumes when settings are saved. | Back to the compose network; broker API requires a 256-bit token instead; data under `/DATA/AppData/dockerbox`. |
+
 ## Performance review (ZimaBoard 2, N150, 8–16 GiB)
 
 * Idle cost per agent box: `tini` + `sleep` ≈ 1 MiB RSS, 0 % CPU. tmux only after

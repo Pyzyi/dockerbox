@@ -147,7 +147,11 @@ func runBroker(ctx context.Context, log *slog.Logger) error {
 	svc := broker.NewService(cfg, engine, log)
 	go svc.RunReconciler(ctx, time.Minute)
 
-	srv := broker.NewServer(svc, cfg, version, log)
+	token, err := broker.LoadOrCreateToken(cfg.TokenFile)
+	if err != nil {
+		return fmt.Errorf("broker token: %w", err)
+	}
+	srv := broker.NewServer(svc, cfg, token, version, log)
 	err = serve(ctx, &http.Server{
 		Addr: cfg.Listen, Handler: srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
@@ -184,7 +188,8 @@ func atoiOr(s string, def int) int {
 func runWeb(ctx context.Context, log *slog.Logger) error {
 	e := envconf.New()
 	listen := e.String("DOCKERBOX_LISTEN", ":8080")
-	brokerURL := e.String("DOCKERBOX_BROKER_URL", "unix:///run/dockerbox/broker.sock")
+	brokerURL := e.String("DOCKERBOX_BROKER_URL", "http://broker:8081")
+	tokenFile := e.String("DOCKERBOX_BROKER_TOKEN_FILE", "/run/dockerbox/broker.token")
 	dataDir := e.String("DOCKERBOX_DATA_DIR", "/data")
 	ttl := e.Duration("DOCKERBOX_SESSION_TTL", 24*time.Hour)
 	secure := e.String("DOCKERBOX_SECURE_COOKIE", "auto")
@@ -206,6 +211,12 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("DOCKERBOX_BROKER_URL %q must be unix:///path or http://host:port", brokerURL)
 	}
 	log = log.With("svc", "web")
+	// Read the broker token first: it is root-only (0600) and readable here
+	// because web still runs as root until the privileges are dropped below.
+	brokerToken, err := waitForFile(ctx, tokenFile, 60*time.Second)
+	if err != nil {
+		return fmt.Errorf("broker token %s: %w", tokenFile, err)
+	}
 	if os.Geteuid() == 0 {
 		// Started as root (compose default) only to prepare the data directory,
 		// which platforms like ZimaOS create as root:root on the host.
@@ -237,7 +248,7 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv := web.NewServer(web.Config{BrokerURL: u, BrokerSocket: brokerSocket, SessionTTL: ttl, SecureCookie: secure}, auth, settings, log)
+	srv := web.NewServer(web.Config{BrokerURL: u, BrokerSocket: brokerSocket, BrokerToken: brokerToken, SessionTTL: ttl, SecureCookie: secure}, auth, settings, log)
 	return serve(ctx, &http.Server{
 		Addr: listen, Handler: srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
@@ -276,6 +287,29 @@ func runEgress(ctx context.Context, log *slog.Logger) error {
 		Addr: listen, Handler: p,
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
 	}, log)
+}
+
+// waitForFile returns the trimmed content of path, waiting while the broker
+// has not created it yet.
+func waitForFile(ctx context.Context, path string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil && len(strings.TrimSpace(string(b))) > 0 {
+			return strings.TrimSpace(string(b)), nil
+		}
+		if time.Now().After(deadline) {
+			if err == nil {
+				err = errors.New("empty")
+			}
+			return "", err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // healthcheck lets distroless images (no curl) run Docker healthchecks.

@@ -137,6 +137,7 @@ func (s *Server) dialTerminal(ctx context.Context, name string, rows, cols int) 
 	req, _ := http.NewRequestWithContext(dctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "tcp")
+	req.Header.Set("Authorization", "Bearer "+s.cfg.BrokerToken)
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	if err := req.Write(conn); err != nil {
 		conn.Close()

@@ -28,6 +28,7 @@ var agentNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}$`)
 type Config struct {
 	BrokerURL    *url.URL
 	BrokerSocket string // if set, the broker is reached over this unix socket
+	BrokerToken  string // shared secret sent as bearer token to the broker
 	SessionTTL   time.Duration
 	SecureCookie string // "auto", "true" or "false"
 }
@@ -53,9 +54,10 @@ func NewServer(cfg Config, auth *Auth, settings *SettingsStore, log *slog.Logger
 	return &Server{
 		cfg: cfg, auth: auth, settings: settings, log: log,
 		limiter: newLoginLimiter(10, 15*time.Minute),
-		broker:  &http.Client{Timeout: 16 * time.Minute, Transport: brokerTransport(cfg.BrokerSocket)},
-		static:  http.FileServerFS(sub),
-		now:     time.Now,
+		broker: &http.Client{Timeout: 16 * time.Minute, Transport: &authTransport{
+			token: cfg.BrokerToken, next: brokerTransport(cfg.BrokerSocket)}},
+		static: http.FileServerFS(sub),
+		now:    time.Now,
 	}
 }
 
@@ -79,6 +81,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agents/{name}/{action}", s.protect(s.withAgent(s.forwardAction)))
 	mux.Handle("GET /api/agents/{name}/terminal", s.protect(s.withAgent(s.terminal)))
 	return securityHeaders(mux)
+}
+
+// authTransport adds the broker token to every request.
+type authTransport struct {
+	token string
+	next  http.RoundTripper
+}
+
+func (t *authTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	return t.next.RoundTrip(r)
 }
 
 // brokerTransport returns the HTTP transport to the broker: a unix socket when

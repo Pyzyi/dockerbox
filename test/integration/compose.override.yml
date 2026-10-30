@@ -13,6 +13,9 @@ services:
       - type: bind
         source: ${IT_DATA_DIR:?run via test/integration/run.sh}
         target: /data
+      - type: volume
+        source: it-token
+        target: /run/dockerbox
     labels:
       dockerbox.instance: it
   broker:
@@ -21,9 +24,19 @@ services:
       DOCKERBOX_AGENT_IMAGE: ${IT_AGENT_IMAGE:-dockerbox-agent:dev}
       DOCKERBOX_MAX_AGENTS: "4"
       DOCKERBOX_INSTANCE: it
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: volume
+        source: it-token
+        target: /run/dockerbox
     labels:
       dockerbox.instance: it
   egress:
     image: ${IT_IMAGE:-dockerbox:dev}
     labels:
       dockerbox.instance: it
+
+volumes:
+  it-token: {}

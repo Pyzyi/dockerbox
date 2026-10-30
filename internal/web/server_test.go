@@ -97,6 +97,10 @@ func testServer(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
 	var calls []string
 	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-broker-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		calls = append(calls, r.Method+" "+r.URL.RequestURI())
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `[]`)
@@ -105,7 +109,7 @@ func testServer(t *testing.T) (*httptest.Server, *[]string) {
 	u, _ := url.Parse(broker.URL)
 	a, _ := NewAuth("correct horse", testKey, time.Hour)
 	st, _ := NewSettingsStore(t.TempDir())
-	s := NewServer(Config{BrokerURL: u, SessionTTL: time.Hour, SecureCookie: "false"}, a, st, slog.New(slog.DiscardHandler))
+	s := NewServer(Config{BrokerURL: u, BrokerToken: "test-broker-token", SessionTTL: time.Hour, SecureCookie: "false"}, a, st, slog.New(slog.DiscardHandler))
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv, &calls

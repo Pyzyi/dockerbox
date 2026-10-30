@@ -317,7 +317,7 @@ func parseSize(t *testing.T, s string) float64 {
 
 func TestBrokerNotReachableFromOutside(t *testing.T) {
 	filter := []string{"--filter", "label=dockerbox.instance=it"}
-	// The broker must only be on the internal control network: no published port.
+	// The broker publishes no port.
 	ports := docker(t, append([]string{"ps", "--filter", "label=dockerbox.role=broker", "--format", "{{.Ports}}"}, filter...)...)
 	if strings.Contains(ports, "->") {
 		t.Fatalf("broker publishes ports: %s", ports)
@@ -326,15 +326,25 @@ func TestBrokerNotReachableFromOutside(t *testing.T) {
 	if strings.Contains(mounts, "docker.sock") {
 		t.Fatalf("web must not mount the docker socket: %s", mounts)
 	}
-	// Not even processes in the host network namespace may reach the broker API
-	// (the control network gives the host no address and no route).
+	// Other processes on the network (e.g. the host) can open a connection,
+	// but the API refuses every request without the token shared with web.
 	ips := docker(t, append([]string{"ps", "--filter", "label=dockerbox.role=broker", "-q"}, filter...)...)
 	addr := docker(t, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", strings.Fields(ips)[0])
+	client := &http.Client{Timeout: 3 * time.Second}
 	for _, ip := range strings.Fields(addr) {
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "8081"), 2*time.Second)
-		if err == nil {
-			conn.Close()
-			t.Fatalf("broker API reachable from the host at %s:8081", ip)
+		for _, auth := range []string{"", "Bearer guessed"} {
+			req, _ := http.NewRequest("GET", "http://"+net.JoinHostPort(ip, "8081")+"/v1/agents", nil)
+			if auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				continue // not reachable at all is fine too
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("broker API answered %d without a valid token", resp.StatusCode)
+			}
 		}
 	}
 }

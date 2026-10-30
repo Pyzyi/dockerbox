@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-10-30
+
+### Fixed
+
+- ZimaOS: saving the app settings failed with "unsupported deployment entry
+  .../broker.sock" because ZimaOS scans volume directories and does not accept
+  socket files. web and broker now use the normal compose network again; the
+  broker API is protected by a random token (created by the broker, readable
+  only by root, read by web before it drops its privileges) instead of by
+  network isolation.
+- App data now lives in `/DATA/AppData/dockerbox/` (ZimaOS convention):
+  `data` for the dashboard, `broker` for the API token.
+
 ## [1.0.1] - 2026-10-30
 
 ### Fixed
@@ -46,5 +59,6 @@ First public release.
   govulncheck, Trivy, gitleaks; automatic multi-arch releases with SBOM and
   provenance; ISO/IEC 25010 quality model, threat model and design audit.
 
+[1.0.2]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.0

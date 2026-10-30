@@ -2,12 +2,18 @@ package broker
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pyzyi/dockerbox/internal/dockerapi"
@@ -28,15 +34,17 @@ type Info struct {
 // Server exposes the broker API on the internal control network. It is the
 // contract between web and broker; see docs/architecture.md.
 type Server struct {
-	svc  *Service
-	info Info
-	log  *slog.Logger
+	token string
+	svc   *Service
+	info  Info
+	log   *slog.Logger
 }
 
-// NewServer returns the HTTP handler of the broker.
-func NewServer(svc *Service, cfg *Config, version string, log *slog.Logger) *Server {
+// NewServer returns the HTTP handler of the broker. Every /v1 request must
+// carry "Authorization: Bearer <token>"; only web knows the token.
+func NewServer(svc *Service, cfg *Config, token, version string, log *slog.Logger) *Server {
 	return &Server{
-		svc: svc, log: log,
+		svc: svc, log: log, token: token,
 		info: Info{
 			Version: version, AgentImage: cfg.AgentImage, Runtime: cfg.Runtime,
 			MaxAgents: cfg.MaxAgents, DefaultMemoryMB: cfg.DefaultMemoryMB, MaxMemoryMB: cfg.MaxMemoryMB,
@@ -58,7 +66,42 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/agents/{name}/usage", s.usage)
 	mux.HandleFunc("GET /v1/agents/{name}/terminal", s.terminal)
 	mux.HandleFunc("POST /v1/terminals/{exec}/resize", s.resize)
-	return mux
+	return s.requireToken(mux)
+}
+
+// requireToken rejects API calls without the shared secret, so that other
+// containers or host processes on the same network cannot drive the broker.
+func (s *Server) requireToken(next http.Handler) http.Handler {
+	want := []byte("Bearer " + s.token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" &&
+			(s.token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), want) != 1) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// LoadOrCreateToken returns the shared broker token stored at path, creating
+// a random one (0600) on first start.
+func LoadOrCreateToken(path string) (string, error) {
+	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) >= 32 {
+		return strings.TrimSpace(string(b)), nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(buf)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(token), 0o600); err != nil {
+		return "", err
+	}
+	return token, os.Rename(tmp, path)
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
