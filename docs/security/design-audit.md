@@ -77,7 +77,7 @@ All findings below were fixed with tests unless marked as documented.
 
 | # | Severity | Finding | Resolution |
 |---|----------|---------|------------|
-| P1 | Medium | Host-network processes could reach the unauthenticated broker API via the `control` bridge gateway. | Broker has no network port (unix socket, see Z3); integration test dials the broker from the host. |
+| P1 | Medium | Host-network processes could reach the unauthenticated broker API via the `control` bridge gateway. | Broker API requires a token shared only with web (see Z4); integration test calls the broker from the host and expects 401. |
 | P2 | Medium | One box could exhaust all proxy slots (no per-client cap, no idle timeout). | Per-box cap, tunnel idle timeout. |
 | P3 | Medium | Allow-list entries opened every port of a LAN host (e.g. the ZimaOS host itself). | `ADDR:PORT` entries, optional port allow-list, docs warn. |
 | P4 | Medium | Recreate parked the old container under a name inside the agent name space; leftovers blocked recreate and kept "deleted" data. | Park name with `.`; leftovers removed by recreate/delete; volume removal errors reported. |
