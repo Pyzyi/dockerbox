@@ -77,6 +77,25 @@ const isRunning = (a) => a?.state === "running";
 
 // ---------------------------------------------------------------- Console
 
+// copyText writes to the clipboard; falls back to execCommand on plain HTTP,
+// where navigator.clipboard is not available.
+function copyText(text) {
+  if (!text) return;
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => {});
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.append(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch { /* not supported */ }
+  ta.remove();
+}
+
 class Console {
   constructor(name) {
     this.name = name;
@@ -109,6 +128,24 @@ class Console {
     this.term.loadAddon(this.fit);
     this.term.open(this.el);
     this.term.onData((d) => this.send(encoder.encode(d)));
+    // Clipboard like in a desktop terminal:
+    //  - Ctrl+V / Ctrl+Shift+V / Cmd+V: let the browser fire its paste event,
+    //    which xterm.js forwards (works over plain HTTP, unlike the async
+    //    clipboard API). Without this, xterm sends ^V to the box.
+    //  - Ctrl+C with a selection, Ctrl+Shift+C, Cmd+C: copy the selection;
+    //    Ctrl+C without a selection still interrupts the running program.
+    this.term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && !e.altKey && key === "v") return false;
+      if (mod && !e.altKey && key === "c" && (e.shiftKey || e.metaKey || this.term.hasSelection())) {
+        copyText(this.term.getSelection());
+        e.preventDefault();
+        return false;
+      }
+      return true;
+    });
     this.term.onBinary((d) => this.send(Uint8Array.from(d, (c) => c.charCodeAt(0))));
     this.term.onResize(({ rows, cols }) => this.sendControl({ type: "resize", rows, cols }));
     this.resizeObserver = new ResizeObserver(() => this.refit());

@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.4] - 2026-10-30
+
+### Fixed
+
+- Console: Ctrl+V (and Ctrl+Shift+V / Cmd+V) pastes from the clipboard; it was
+  sent to the box as a control character. Ctrl+C copies when text is selected
+  (Ctrl+Shift+C always), otherwise it still interrupts the running program.
+  Works over plain HTTP.
+- Console: no tmux right-click menu any more (it covered the browser's context
+  menu with "Paste"). Mouse-wheel scrolling stays. Existing boxes get this with
+  "Re-create from image".
+
 ## [1.0.3] - 2026-10-30
 
 ### Fixed
@@ -71,6 +83,7 @@ First public release.
   govulncheck, Trivy, gitleaks; automatic multi-arch releases with SBOM and
   provenance; ISO/IEC 25010 quality model, threat model and design audit.
 
+[1.0.4]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.4
 [1.0.3]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.3
 [1.0.2]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Pyzyi/dockerbox/releases/tag/v1.0.1

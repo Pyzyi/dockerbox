@@ -8,6 +8,8 @@ Dockerbox - you are root inside an isolated box.
                other agents are not reachable by design.
   Session:     this console is a tmux session; closing the browser keeps it
                running. Detach: Ctrl-b d   New window: Ctrl-b c
+  Clipboard:   paste with Ctrl+V or right click > Paste; select text with
+               Shift + drag, copy with Ctrl+C (or Ctrl+Shift+C)
 
 Install an agent (examples, check the vendor's docs for current commands):
   apt-get update && apt-get install -y nodejs npm python3 python3-pip
