@@ -1,0 +1,29 @@
+# Overrides for integration tests: locally built images, fixed password, test
+# port and a separate instance ("it"), so tests never touch a real installation
+# running on the same host.
+services:
+  web:
+    image: ${IT_IMAGE:-dockerbox:dev}
+    ports: !override
+      - "127.0.0.1:18420:8080"
+    environment:
+      DOCKERBOX_PASSWORD: integration-test-password
+    # Like ZimaOS: /data is a host directory owned by root:root.
+    volumes:
+      - type: bind
+        source: ${IT_DATA_DIR:?run via test/integration/run.sh}
+        target: /data
+    labels:
+      dockerbox.instance: it
+  broker:
+    image: ${IT_IMAGE:-dockerbox:dev}
+    environment:
+      DOCKERBOX_AGENT_IMAGE: ${IT_AGENT_IMAGE:-dockerbox-agent:dev}
+      DOCKERBOX_MAX_AGENTS: "4"
+      DOCKERBOX_INSTANCE: it
+    labels:
+      dockerbox.instance: it
+  egress:
+    image: ${IT_IMAGE:-dockerbox:dev}
+    labels:
+      dockerbox.instance: it

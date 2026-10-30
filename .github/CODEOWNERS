@@ -1,0 +1,8 @@
+# Default reviewers for everything
+*                               @Pyzyi
+
+# Security-critical paths require an explicit review
+/internal/broker/               @Pyzyi
+/internal/egress/               @Pyzyi
+/docker-compose.yml             @Pyzyi
+/docs/security/                 @Pyzyi

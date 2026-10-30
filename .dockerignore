@@ -1,0 +1,11 @@
+.git
+.github
+docs
+test
+bin
+dist
+web/node_modules
+internal/web/static/vendor
+images
+*.md
+!README.md

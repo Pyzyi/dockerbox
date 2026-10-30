@@ -1,0 +1,24 @@
+#!/bin/sh
+# Prints how to work inside a Dockerbox agent box.
+cat <<'TXT'
+Dockerbox - you are root inside an isolated box.
+
+  Persistent:  /root and /workspace (kept when the box is re-created)
+  Network:     Internet via the egress proxy (HTTP/HTTPS). Host, LAN and
+               other agents are not reachable by design.
+  Session:     this console is a tmux session; closing the browser keeps it
+               running. Detach: Ctrl-b d   New window: Ctrl-b c
+
+Install an agent (examples, check the vendor's docs for current commands):
+  apt-get update && apt-get install -y nodejs npm python3 python3-pip
+  npm install -g <agent-cli-package>
+  pip install --break-system-packages <agent-package>
+  curl -fsSL <vendor-install-script-url> | bash
+
+SSH through the proxy (e.g. git over SSH):
+  ssh -o ProxyCommand='nc -X connect -x dockerbox-egress:3128 %h %p' git@github.com
+  (or use HTTPS remotes, which use the proxy automatically)
+
+API keys you store here are readable by the agent in this box.
+Use dedicated keys with spending limits.
+TXT

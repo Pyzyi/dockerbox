@@ -1,0 +1,243 @@
+# Dockerbox - AI Agent in a Box
+#
+# Installs on ZimaOS / CasaOS (App Store -> "Custom Install" -> import this
+# file) and on any Docker host with Compose v2. No host changes required.
+#
+# All values are literal on purpose: ZimaOS does not support "${VAR:-default}"
+# interpolation. Change settings here (or in the ZimaOS app settings), e.g. the
+# published port, the password or the limits below.
+#
+# Agent boxes are created at runtime by the broker as hardened sibling
+# containers (see docs/architecture.md). They are labelled
+# dockerbox.managed=true and are NOT removed when this stack is removed;
+# delete them in the dashboard first (or see docs/operations.md).
+
+name: dockerbox
+
+services:
+  web:
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.0
+    command: ["web"]
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+    ports:
+      - target: 8080
+        published: "8420"
+        protocol: tcp
+    environment:
+      # Dashboard password, at least 12 characters. Leave empty to generate one
+      # on first start; it is printed once in the log of this container.
+      DOCKERBOX_PASSWORD: ""
+      DOCKERBOX_BROKER_URL: http://broker:8081
+      DOCKERBOX_SESSION_TTL: 24h
+      TZ: UTC
+    volumes:
+      - type: volume
+        source: data
+        target: /data
+    networks:
+      - frontend
+      - control
+    # Starts as root only to take ownership of /data (ZimaOS creates volume
+    # directories as root:root), then permanently switches to uid 65532 and
+    # loses these capabilities. The dashboard never runs as root.
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "/dockerbox", "healthcheck", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    labels:
+      dockerbox.role: web
+      dockerbox.instance: default
+    x-casaos:
+      envs:
+        - container: DOCKERBOX_PASSWORD
+          description:
+            en_us: Dashboard password (min. 12 characters). Empty = generated on first start, see container log.
+            de_de: Dashboard-Passwort (mind. 12 Zeichen). Leer = wird beim ersten Start erzeugt, siehe Container-Log.
+        - container: TZ
+          description:
+            en_us: Time zone for log timestamps, e.g. Europe/Berlin
+            de_de: Zeitzone für Log-Zeitstempel, z. B. Europe/Berlin
+      ports:
+        - container: "8080"
+          description:
+            en_us: Web dashboard
+            de_de: Web-Oberfläche
+      volumes:
+        - container: /data
+          description:
+            en_us: Dashboard password, session key and appearance settings
+            de_de: Dashboard-Passwort, Sitzungsschlüssel und Darstellungs-Einstellungen
+
+  broker:
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.0
+    command: ["broker"]
+    restart: unless-stopped
+    environment:
+      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.0
+      # Optional: "runsc" (gVisor) or "sysbox-runc" if installed on the host.
+      DOCKERBOX_AGENT_RUNTIME: ""
+      DOCKERBOX_MAX_AGENTS: "10"
+      DOCKERBOX_DEFAULT_MEMORY_MB: "2048"
+      DOCKERBOX_MAX_MEMORY_MB: "8192"
+      DOCKERBOX_DEFAULT_CPUS: "2"
+      DOCKERBOX_MAX_CPUS: "4"
+      DOCKERBOX_INSTANCE: default
+    volumes:
+      # The ONLY component with Docker access. Not reachable from the browser,
+      # the host network or agent boxes (internal network shared with web only).
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    networks:
+      - control
+    # Runs as UID 0 solely to open the root-owned socket; all capabilities dropped.
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "/dockerbox", "healthcheck", "http://127.0.0.1:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    labels:
+      dockerbox.role: broker
+      dockerbox.instance: default
+    x-casaos:
+      envs:
+        - container: DOCKERBOX_MAX_AGENTS
+          description:
+            en_us: Maximum number of agent boxes
+            de_de: Maximale Anzahl Agenten-Boxen
+        - container: DOCKERBOX_MAX_MEMORY_MB
+          description:
+            en_us: Maximum memory per agent box in MB
+            de_de: Maximaler Arbeitsspeicher pro Agenten-Box in MB
+        - container: DOCKERBOX_MAX_CPUS
+          description:
+            en_us: Maximum CPU cores per agent box
+            de_de: Maximale CPU-Kerne pro Agenten-Box
+
+  egress:
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.0
+    command: ["egress"]
+    restart: unless-stopped
+    environment:
+      # Comma-separated private targets agents MAY reach. Use ADDR:PORT, e.g.
+      # "192.168.1.50:11434" for a local LLM server: a bare address opens every
+      # port on that host. Empty = Internet only (recommended).
+      DOCKERBOX_EGRESS_ALLOW_CIDRS: ""
+      # Optional: only these destination ports, e.g. "80,443,22".
+      DOCKERBOX_EGRESS_ALLOWED_PORTS: ""
+      # Comma-separated public addresses agents must NOT reach, e.g. this
+      # server's own public/WAN IP on a VPS or with NAT hairpinning.
+      DOCKERBOX_EGRESS_DENY_CIDRS: ""
+    networks:
+      - egress
+    # Agent networks are attached at runtime by the broker.
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "/dockerbox", "healthcheck", "tcp://127.0.0.1:3128"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    labels:
+      # The broker finds the proxy by these labels.
+      dockerbox.role: egress
+      dockerbox.instance: default
+    x-casaos:
+      envs:
+        - container: DOCKERBOX_EGRESS_ALLOW_CIDRS
+          description:
+            en_us: "LAN services agents may reach, as ADDR:PORT (e.g. 192.168.1.50:11434). Empty = Internet only."
+            de_de: "LAN-Dienste, die Agenten erreichen dürfen, als ADRESSE:PORT (z. B. 192.168.1.50:11434). Leer = nur Internet."
+
+networks:
+  frontend: {}
+  control:
+    # web <-> broker only. inhibit_ipv4 gives the host no address on this
+    # bridge, so processes in the host network namespace (e.g. other apps
+    # using network_mode: host) cannot reach the broker API either.
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
+  egress: {}
+
+volumes:
+  data: {}
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: web
+  index: /
+  port_map: "8420"
+  scheme: http
+  store_app_id: dockerbox
+  category: Developer
+  author: dockerbox contributors
+  developer: dockerbox contributors
+  icon: https://raw.githubusercontent.com/Pyzyi/dockerbox/main/docs/assets/icon.svg
+  title:
+    en_us: Dockerbox
+  tagline:
+    en_us: AI Agent in a Box - isolated Linux consoles for AI agents
+    de_de: KI-Agent in der Box - isolierte Linux-Konsolen für KI-Agenten
+  description:
+    en_us: >-
+      Run AI agents with full root rights inside lightweight, isolated Linux
+      boxes - one box per agent, managed from a web dashboard, without the
+      overhead of virtual machines. Agents can reach the Internet but not
+      your server, your home network or each other.
+    de_de: >-
+      Betreibe KI-Agenten mit vollen Root-Rechten in leichtgewichtigen,
+      isolierten Linux-Boxen - eine Box pro Agent, verwaltet über ein
+      Web-Dashboard, ohne den Overhead virtueller Maschinen. Agenten erreichen
+      das Internet, aber nicht deinen Server, dein Heimnetz oder einander.
+  tips:
+    before_install:
+      en_us: >-
+        Set a dashboard password (DOCKERBOX_PASSWORD, min. 12 characters) or
+        read the generated one from the log of the "web" container after the
+        first start.
+      de_de: >-
+        Lege ein Dashboard-Passwort fest (DOCKERBOX_PASSWORD, mind. 12 Zeichen)
+        oder lies das erzeugte Passwort nach dem ersten Start im Log des
+        Containers "web".

@@ -1,0 +1,25 @@
+#!/bin/sh
+# PID 1 child of tini. Prepares the box and then idles at ~0 CPU / ~1 MiB RSS.
+# Interactive consoles are separate `docker exec` sessions into tmux.
+set -eu
+
+# apt does not reliably read proxy variables for every code path; configure it explicitly.
+if [ -n "${HTTP_PROXY:-}" ]; then
+  cat > /etc/apt/apt.conf.d/90dockerbox-proxy <<CONF
+Acquire::http::Proxy "${HTTP_PROXY}";
+Acquire::https::Proxy "${HTTPS_PROXY:-$HTTP_PROXY}";
+CONF
+  # Make the proxy visible to login shells and tools that reset the environment.
+  {
+    echo "HTTP_PROXY=${HTTP_PROXY}"
+    echo "HTTPS_PROXY=${HTTPS_PROXY:-$HTTP_PROXY}"
+    echo "http_proxy=${HTTP_PROXY}"
+    echo "https_proxy=${HTTPS_PROXY:-$HTTP_PROXY}"
+    echo "NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1}"
+    echo "no_proxy=${NO_PROXY:-localhost,127.0.0.1,::1}"
+    echo "NODE_USE_ENV_PROXY=1"
+  } > /etc/environment
+fi
+
+mkdir -p /workspace
+exec sleep infinity

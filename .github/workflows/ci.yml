@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: make ui
+      - run: make lint
+      - run: make test
+      - run: make vuln
+
+  static:
+    name: Dockerfiles, shell, compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: Dockerfile
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: images/agent/Dockerfile
+      - name: shellcheck
+        run: shellcheck test/integration/run.sh images/agent/rootfs/usr/local/bin/* images/agent/rootfs/etc/profile.d/*.sh
+      - name: compose file is valid
+        run: docker compose -f docker-compose.yml config -q
+      - name: compose file uses the images of VERSION
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          n=$(grep -cE "ghcr.io/pyzyi/dockerbox-(core|agentbox):$v\b" docker-compose.yml)
+          if [ "$n" -ne 4 ]; then
+            echo "::error::docker-compose.yml must reference version $v in all 4 image references (found $n)"; exit 1
+          fi
+      - name: compose file is ZimaOS-compatible (no variable interpolation)
+        run: |
+          if grep -nE '^[^#]*[$][{]' docker-compose.yml; then
+            echo "docker-compose.yml must not use \${...} interpolation (ZimaOS cannot parse it)"; exit 1
+          fi
+
+  secrets:
+    name: Secret & personal data scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  integration:
+    name: Images, integration & image scan
+    needs: [go, static]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Build images
+        run: make images VERSION=ci
+      - name: Image size budget (ISO 25010 resource utilisation)
+        run: |
+          size=$(docker image inspect dockerbox:ci --format '{{.Size}}')
+          echo "service image: $((size / 1024 / 1024)) MiB"
+          test "$size" -lt $((30 * 1024 * 1024))
+      - name: Integration tests (escape attempts, isolation, lifecycle)
+        run: make it VERSION=ci
+        env:
+          IT_INTERNET: "1"
+      - name: Trivy scan (service image)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, pinned by SHA
+        with:
+          image-ref: dockerbox:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy scan (agent image)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, pinned by SHA
+        with:
+          image-ref: dockerbox-agent:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"

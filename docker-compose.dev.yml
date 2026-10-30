@@ -1,0 +1,11 @@
+# Local development: use images built with `make images` instead of GHCR.
+#   make images && make dev-up
+services:
+  web:
+    image: dockerbox:${DOCKERBOX_VERSION:-dev}
+  broker:
+    image: dockerbox:${DOCKERBOX_VERSION:-dev}
+    environment:
+      DOCKERBOX_AGENT_IMAGE: dockerbox-agent:${DOCKERBOX_VERSION:-dev}
+  egress:
+    image: dockerbox:${DOCKERBOX_VERSION:-dev}

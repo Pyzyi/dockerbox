@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security issues:** please use private vulnerability reporting instead (see SECURITY.md).
+        Remove personal data (IPs, hostnames, tokens) from logs before posting.
+  - type: input
+    id: version
+    attributes:
+      label: Dockerbox version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host OS / Docker version
+      placeholder: "ZimaOS 1.x, Docker 27.x"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: "`docker compose logs web broker egress` (redacted)"
+      render: shell

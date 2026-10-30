@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0b0d14">
+  <title>Dockerbox</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <!-- Wallpaper the glass refracts. Purely decorative. -->
+  <div class="wallpaper" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span>
+  </div>
+
+  <!-- Login -->
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="glass sheet login-card">
+      <div class="app-icon glass"><img src="icon.svg" alt="" width="44" height="44"></div>
+      <h1>Dockerbox</h1>
+      <p class="secondary" data-i18n="tagline">AI Agent in a Box</p>
+      <label class="field">
+        <span class="sr-only" data-i18n="password">Password</span>
+        <input id="login-password" type="password" autocomplete="current-password" required autofocus data-i18n-placeholder="password" placeholder="Password">
+      </label>
+      <p id="login-error" class="error" role="alert"></p>
+      <button class="btn primary wide" type="submit" data-i18n="login">Log in</button>
+    </form>
+  </main>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <aside id="sidebar" class="sidebar glass">
+      <header class="sidebar-head">
+        <div class="brand">
+          <img src="icon.svg" alt="" width="26" height="26">
+          <span>Dockerbox</span>
+        </div>
+        <div class="head-actions">
+          <button id="open-settings" class="icon-btn" type="button" data-i18n-title="settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>
+          </button>
+          <button id="collapse" class="icon-btn" type="button" data-i18n-title="collapse" title="Collapse sidebar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3.5"/><path d="M9.5 4.5v15"/></svg>
+          </button>
+        </div>
+      </header>
+      <p class="section-label" data-i18n="agents">Agents</p>
+      <nav>
+        <ul id="agent-list" class="agent-list" data-i18n-label="agents" aria-label="Agents"></ul>
+      </nav>
+      <footer class="sidebar-foot">
+        <button id="add-agent" class="btn primary wide" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span data-i18n="addAgent">Add agent</span>
+        </button>
+      </footer>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div class="capsule glass title-capsule">
+          <button id="expand" class="icon-btn" type="button" data-i18n-title="expand" title="Show sidebar" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3.5"/><path d="M9.5 4.5v15"/></svg>
+          </button>
+          <span id="current-dot" class="dot none"></span>
+          <span id="current-name" class="current-name"></span>
+          <span id="usage" class="usage"></span>
+        </div>
+        <span class="spacer"></span>
+        <div class="capsule glass toolbar" role="toolbar" aria-label="Agent">
+          <button id="tb-power" class="icon-btn" type="button" data-action="start" data-i18n-title="start" title="Start">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v8"/><path d="M6.6 7.2a7.5 7.5 0 1 0 10.8 0"/></svg>
+          </button>
+          <button id="tb-restart" class="icon-btn" type="button" data-action="restart" data-i18n-title="restart" title="Restart">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+          </button>
+          <button id="settings-btn" class="icon-btn" type="button" data-i18n-title="details" title="Details">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".6" fill="currentColor"/></svg>
+          </button>
+          <div class="menu-wrap">
+            <button id="menu-btn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="actions" title="Actions">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor"/></svg>
+            </button>
+            <div id="menu" class="menu glass" role="menu" hidden>
+              <button role="menuitem" data-action="start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg><span data-i18n="start">Start</span></button>
+              <button role="menuitem" data-action="restart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg><span data-i18n="restart">Restart</span></button>
+              <button role="menuitem" data-action="stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg><span data-i18n="stop">Shut down</span></button>
+              <hr role="separator">
+              <button role="menuitem" data-action="popout"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h5.5V10"/><path d="M19.5 4.5 11 13"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg><span data-i18n="popout">Open in new window</span></button>
+              <button role="menuitem" data-action="recreate"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg><span data-i18n="recreate">Re-create from image</span></button>
+              <hr role="separator">
+              <button role="menuitem" data-action="delete" class="danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4.5h6V7"/></svg><span data-i18n="delete">Delete agent…</span></button>
+              <hr role="separator">
+              <button role="menuitem" data-action="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg><span data-i18n="settings">Settings</span></button>
+              <button role="menuitem" data-action="logout"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5h3a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-3"/><path d="M10 16.5 5.5 12 10 7.5M5.5 12H15"/></svg><span data-i18n="logout">Log out</span></button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div id="stage" class="stage glass console-glass">
+        <div id="empty" class="center" hidden>
+          <div class="app-icon glass large"><img src="icon.svg" alt="" width="56" height="56"></div>
+          <h2 data-i18n="emptyTitle">Your first agent box</h2>
+          <p class="secondary" data-i18n="empty">No agent yet. Create your first isolated box.</p>
+          <button id="empty-add" class="btn primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span data-i18n="addAgent">Add agent</span>
+          </button>
+        </div>
+        <div id="powered-off" class="center" hidden>
+          <button id="power" class="power glass" type="button" data-i18n-title="start" title="Start">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v8"/><path d="M6.6 7.2a7.5 7.5 0 1 0 10.8 0"/></svg>
+          </button>
+          <p id="power-status" class="secondary"></p>
+        </div>
+        <div id="terminals" class="terminals"></div>
+        <div id="term-overlay" class="center overlay" hidden>
+          <p id="term-overlay-text" class="secondary"></p>
+          <button id="reconnect" class="btn" type="button" data-i18n="reconnect">Reconnect</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Dialogs -->
+  <dialog id="create-dialog" class="glass sheet">
+    <form id="create-form" method="dialog">
+      <h2 data-i18n="addAgent">Add agent</h2>
+      <label class="field">
+        <span data-i18n="name">Name</span>
+        <input id="create-name" required pattern="[a-z0-9][a-z0-9\-]{0,30}" maxlength="31" autocomplete="off" placeholder="my-agent">
+        <small class="secondary" data-i18n="nameHint">a–z, 0–9 and “-”, max. 31 characters</small>
+      </label>
+      <div class="row">
+        <label class="field">
+          <span data-i18n="memory">Memory (MB)</span>
+          <input id="create-memory" type="number" min="128" step="1" required>
+        </label>
+        <label class="field">
+          <span data-i18n="cpus">CPU cores</span>
+          <input id="create-cpus" type="number" min="0.1" step="0.1" required>
+        </label>
+      </div>
+      <p class="note secondary" data-i18n="createHint">The agent gets its own Linux box with root rights inside. It can reach the Internet, but not your host, your LAN or other agents.</p>
+      <p id="create-error" class="error" role="alert"></p>
+      <div class="actions">
+        <button class="btn" type="button" data-close data-i18n="cancel">Cancel</button>
+        <button id="create-submit" class="btn primary" type="submit" data-i18n="create">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="delete-dialog" class="glass sheet">
+    <form id="delete-form" method="dialog">
+      <h2 data-i18n="deleteTitle">Delete agent?</h2>
+      <p><span data-i18n="deleteText">This removes the box</span> <strong id="delete-name"></strong>.</p>
+      <label class="switch">
+        <input id="delete-keep" type="checkbox" role="switch" checked>
+        <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+        <span data-i18n="keepData">Keep data (/root and /workspace) for later</span>
+      </label>
+      <p id="delete-error" class="error" role="alert"></p>
+      <div class="actions">
+        <button class="btn" type="button" data-close data-i18n="cancel">Cancel</button>
+        <button class="btn danger" type="submit" data-i18n="delete">Delete</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="details-dialog" class="glass sheet">
+    <form method="dialog">
+      <h2 data-i18n="details">Details</h2>
+      <dl id="details-list" class="details"></dl>
+      <p class="note secondary" data-i18n="detailsHint">Tip: install your agent inside the console, e.g. with npm, pip or curl. Run “dockerbox-help” for examples. API keys you enter are visible to the agent in this box.</p>
+      <div class="actions">
+        <button class="btn primary" type="submit" data-i18n="close">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog" class="glass sheet settings-sheet">
+    <form id="settings-form" method="dialog">
+      <h2 data-i18n="settings">Settings</h2>
+
+      <section class="setting">
+        <h3 data-i18n="appearance">Appearance</h3>
+        <div class="segmented" role="radiogroup" data-i18n-label="appearance">
+          <label><input type="radio" name="theme" value="auto"><span data-i18n="auto">Automatic</span></label>
+          <label><input type="radio" name="theme" value="light"><span data-i18n="light">Light</span></label>
+          <label><input type="radio" name="theme" value="dark"><span data-i18n="dark">Dark</span></label>
+        </div>
+      </section>
+
+      <section class="setting">
+        <h3 data-i18n="accent">Accent colour</h3>
+        <div id="set-accents" class="swatches" role="radiogroup" data-i18n-label="accent"></div>
+      </section>
+
+      <section class="setting">
+        <h3 data-i18n="wallpaper">Background</h3>
+        <div id="set-wallpapers" class="tiles" role="radiogroup" data-i18n-label="wallpaper"></div>
+        <div id="set-wallcolors" class="wall-colors" hidden>
+          <input type="color" data-wall="0" data-i18n-label="wallColor">
+          <input type="color" data-wall="1" data-i18n-label="wallColor">
+          <input type="color" data-wall="2" data-i18n-label="wallColor">
+          <input type="color" data-wall="3" data-i18n-label="wallColor">
+        </div>
+      </section>
+
+      <section class="setting">
+        <h3 data-i18n="glass">Glass</h3>
+        <label class="slider">
+          <span data-i18n="transparency">Transparency</span>
+          <input id="set-glass" type="range" min="0" max="100" step="5">
+          <output id="set-glass-out"></output>
+        </label>
+        <label class="switch">
+          <input id="set-motion" type="checkbox" role="switch">
+          <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+          <span data-i18n="motion">Animate background</span>
+        </label>
+      </section>
+
+      <section class="setting">
+        <h3 data-i18n="console">Console</h3>
+        <label class="slider">
+          <span data-i18n="fontSize">Font size</span>
+          <input id="set-font" type="range" min="10" max="22" step="1">
+          <output id="set-font-out"></output>
+        </label>
+      </section>
+
+      <section class="setting">
+        <h3 data-i18n="language">Language</h3>
+        <div class="segmented" role="radiogroup" data-i18n-label="language">
+          <label><input type="radio" name="language" value="auto"><span data-i18n="auto">Automatic</span></label>
+          <label><input type="radio" name="language" value="de"><span>Deutsch</span></label>
+          <label><input type="radio" name="language" value="en"><span>English</span></label>
+        </div>
+      </section>
+
+      <p id="settings-error" class="error" role="alert"></p>
+      <div class="actions">
+        <button id="settings-reset" class="btn" type="button" data-i18n="reset">Reset</button>
+        <button class="btn primary" type="submit" data-i18n="done">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast glass" role="status" hidden></div>
+</body>
+</html>

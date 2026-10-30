@@ -1,0 +1,20 @@
+# Build output
+/bin/
+/dist/
+/coverage.out
+/internal/web/static/vendor/
+
+# Frontend
+/web/node_modules/
+/web/dist/
+
+# Local configuration and secrets - never commit
+.env
+*.env.local
+/data/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
