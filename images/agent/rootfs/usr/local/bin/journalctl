@@ -1,0 +1,35 @@
+#!/bin/bash
+# Dockerbox journalctl - shows the logs of services started by the dockerbox
+# systemctl replacement (/var/log/dockerbox-services/<unit>.log).
+set -u
+LOGS=/var/log/dockerbox-services
+units=() follow=0 lines=""
+while (($#)); do
+	case $1 in
+	-u | --unit) units+=("${2:-}"); shift ;;
+	--unit=*) units+=("${1#*=}") ;;
+	-u*) units+=("${1#-u}") ;;
+	-f | --follow) follow=1 ;;
+	-n | --lines) lines=${2:-}; shift ;;
+	--lines=*) lines=${1#*=} ;;
+	-n*) lines=${1#-n} ;;
+	-e | --pager-end) lines=${lines:-1000} ;;
+	esac
+	shift
+done
+files=()
+if ((${#units[@]})); then
+	for u in "${units[@]}"; do
+		u=${u##*/}
+		[[ $u == *.* ]] || u="$u.service"
+		[[ -e "$LOGS/$u.log" ]] && files+=("$LOGS/$u.log") || echo "-- No entries for $u --" >&2
+	done
+else
+	for f in "$LOGS"/*.log; do [[ -e $f ]] && files+=("$f"); done
+fi
+((${#files[@]})) || exit 0
+[[ $lines == all || -z $lines ]] && lines=+1
+args=(-n "$lines")
+((follow)) && args+=(-F)
+((${#files[@]} > 1)) || args+=(-q)
+exec tail "${args[@]}" "${files[@]}"

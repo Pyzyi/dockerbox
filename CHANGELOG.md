@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.5] - 2026-10-30
+
+### Added
+
+- Boxes understand `systemctl`. Installers that register a systemd service
+  (`systemctl enable --now ...`) now just work: the service starts at once, is
+  restarted according to `Restart=`, runs as `User=` with `Environment=` /
+  `EnvironmentFile=` and the box's proxy settings, and enabled services start
+  again whenever the box boots. Logs: `journalctl -u <service>`. Previously
+  such services never started (boxes have no systemd), so agents showed as
+  offline. Existing boxes get this with "Re-create from image"; then run the
+  installer again.
+
 ## [1.0.4] - 2026-10-30
 
 ### Fixed

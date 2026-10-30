@@ -40,6 +40,8 @@ Eine Box im Leerlauf braucht **unter 1 MiB RAM**.
 
 **Es ist kein KI-Agent vorinstalliert** — die Box ist eine schlanke Debian-Konsole.
 Installiere den Agenten deiner Wahl darin (`dockerbox-help` in der Konsole zeigt Beispiele).
+Installer, die einen Dienst einrichten (`systemctl enable --now …`), funktionieren
+ohne Handarbeit: Dienste laufen überwacht weiter und starten mit der Box neu.
 
 ## Schnellstart
 

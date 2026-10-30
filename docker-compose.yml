@@ -16,7 +16,7 @@ name: dockerbox
 
 services:
   web:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.4
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.5
     command: ["web"]
     restart: unless-stopped
     depends_on:
@@ -91,14 +91,14 @@ services:
             de_de: Interner API-Schlüssel zwischen web und broker
 
   broker:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.4
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.5
     command: ["broker"]
     restart: unless-stopped
     depends_on:
       egress:
         condition: service_started
     environment:
-      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.4
+      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.5
       # Optional: "runsc" (gVisor) or "sysbox-runc" if installed on the host.
       DOCKERBOX_AGENT_RUNTIME: ""
       DOCKERBOX_MAX_AGENTS: "10"
@@ -154,7 +154,7 @@ services:
             de_de: Maximale CPU-Kerne pro Agenten-Box
 
   egress:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.4
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.5
     command: ["egress"]
     restart: unless-stopped
     environment:

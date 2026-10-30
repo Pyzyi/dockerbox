@@ -14,6 +14,15 @@ RUN apt-get update \
 
 COPY rootfs/ /
 
+# Boxes have no systemd. Installers that register a service ("systemctl enable
+# --now ...") get a compatible replacement that supervises the service and
+# starts it again when the box boots (see /usr/local/bin/systemctl).
+RUN for t in systemctl journalctl; do \
+      if [ -e /usr/bin/$t ]; then dpkg-divert --local --rename --divert /usr/bin/$t.distrib --add /usr/bin/$t; fi; \
+      ln -sf /usr/local/bin/$t /usr/bin/$t; \
+    done \
+ && mkdir -p /etc/systemd/system /run/systemd/system
+
 ENV LANG=C.UTF-8 \
     TERM=xterm-256color
 WORKDIR /workspace

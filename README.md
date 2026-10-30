@@ -52,6 +52,8 @@ An idle box costs **< 1 MiB of RAM**. The management services together use about
 
 **No AI agent is pre-installed** — the box is a plain Debian console. Install the
 agent of your choice inside it (run `dockerbox-help` in the console for hints).
+Installers that register a service (`systemctl enable --now ...`) work without
+manual steps: services are supervised and start again with the box.
 
 ## Quick start
 

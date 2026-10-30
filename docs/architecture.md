@@ -86,6 +86,10 @@ flowchart LR
 * Runs `tini -> sleep infinity` when idle (≈1 MiB RSS). The interactive shell is
   a `docker exec` into a persistent `tmux` session, so the agent keeps running
   when the browser is closed, and several windows can watch the same session.
+* Boxes have no systemd (it would need a privileged container). A small
+  `systemctl`/`journalctl` replacement runs the services that installers
+  register: supervised background processes with `Restart=`, `User=` and
+  `Environment=` support; enabled services start when the box boots.
 * `/root` and `/workspace` are named volumes, so the box can be re-created from a
   newer image without losing data.
 

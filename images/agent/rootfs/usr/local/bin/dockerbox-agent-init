@@ -22,4 +22,8 @@ CONF
 fi
 
 mkdir -p /workspace
+
+# Start services that were enabled with "systemctl enable" (dockerbox replacement).
+/usr/local/bin/systemctl __boot || true
+
 exec sleep infinity

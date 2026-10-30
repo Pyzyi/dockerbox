@@ -273,6 +273,38 @@ func TestAgentBoxIsolation(t *testing.T) {
 		}
 	})
 
+	t.Run("systemd services run and start on boot", func(t *testing.T) {
+		mustExec(t, "it-alpha", `cat > /etc/systemd/system/it-svc.service <<'EOF'
+[Service]
+User=nobody
+Environment="GREETING=hello box"
+ExecStart=/bin/sh -c 'echo "$GREETING as $(id -un) via $HTTPS_PROXY"; exec sleep infinity'
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl enable --now it-svc`)
+		if got := mustExec(t, "it-alpha", "systemctl is-active it-svc"); got != "active" {
+			t.Fatalf("service not active: %q", got)
+		}
+		if code, body := c.call("POST", "/api/agents/it-alpha/restart", nil); code != 200 {
+			t.Fatalf("restart: %d %s", code, body)
+		}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			out, _ := dockerExec(t, "it-alpha", "systemctl is-active it-svc && journalctl -u it-svc -n 1")
+			if strings.Contains(out, "hello box as nobody via http://dockerbox-egress:3128") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("enabled service not started after box restart: %q", out)
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		mustExec(t, "it-alpha", "systemctl disable --now it-svc && ! systemctl is-active -q it-svc")
+	})
+
 	t.Run("idle box is cheap", func(t *testing.T) {
 		out := docker(t, "stats", "--no-stream", "--format", "{{.MemUsage}}", boxPrefix+"it-beta")
 		t.Logf("idle box memory: %s", out)

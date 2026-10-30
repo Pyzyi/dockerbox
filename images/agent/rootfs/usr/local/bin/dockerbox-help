@@ -10,6 +10,8 @@ Dockerbox - you are root inside an isolated box.
                running. Detach: Ctrl-b d   New window: Ctrl-b c
   Clipboard:   paste with Ctrl+V or right click > Paste; select text with
                Shift + drag, copy with Ctrl+C (or Ctrl+Shift+C)
+  Services:    systemctl works (start/stop/enable/status); enabled services
+               start with the box. Logs: journalctl -u <service> [-f]
 
 Install an agent (examples, check the vendor's docs for current commands):
   apt-get update && apt-get install -y nodejs npm python3 python3-pip

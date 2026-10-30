@@ -1,0 +1,367 @@
+#!/bin/bash
+# Dockerbox systemctl - runs systemd services inside an agent box.
+#
+# Boxes have no systemd (that would need a privileged container). Installers
+# of agents and tools still often register a systemd service and call
+# "systemctl enable --now ...". This small replacement understands the usual
+# unit files, starts services as supervised background processes, restarts
+# them according to Restart=, and starts enabled services when the box boots.
+#
+# Logs:  /var/log/dockerbox-services/<unit>.log  (also: journalctl -u <unit>)
+set -u
+
+UNIT_DIRS=(/etc/systemd/system /run/systemd/system /usr/local/lib/systemd/system /lib/systemd/system /usr/lib/systemd/system)
+STATE=/run/dockerbox-services
+LOGS=/var/log/dockerbox-services
+WANTS_DIR=/etc/systemd/system
+mkdir -p "$STATE" "$LOGS" 2>/dev/null
+
+note() { [[ $QUIET == 1 ]] || printf '%s\n' "$*" >&2; }
+
+# ---------------------------------------------------------------- unit files
+
+normalize() { # foo -> foo.service
+	local u=${1##*/}
+	[[ $u == *.* ]] || u="$u.service"
+	printf '%s' "$u"
+}
+
+find_unit() {
+	local u=$1 d
+	[[ ${2:-} == user && -f "$HOME/.config/systemd/user/$u" ]] && { printf '%s' "$HOME/.config/systemd/user/$u"; return 0; }
+	for d in "${UNIT_DIRS[@]}" "$HOME/.config/systemd/user"; do
+		[[ -f "$d/$u" ]] && { printf '%s' "$d/$u"; return 0; }
+	done
+	return 1
+}
+
+# parse_unit FILE: fills the U_* variables from the [Service] and [Install]
+# sections (continuation lines, comments and repeated keys handled).
+parse_unit() {
+	U_EXEC_START=() U_EXEC_PRE=() U_EXEC_STOP=() U_ENV=() U_ENV_FILES=()
+	U_TYPE=simple U_RESTART=no U_RESTART_SEC=1 U_USER="" U_GROUP="" U_WORKDIR="" U_PIDFILE="" U_WANTED_BY=() U_REMAIN=no
+	local section="" line="" raw key val
+	while IFS= read -r raw || [[ -n $raw ]]; do
+		if [[ $raw == *\\ ]]; then line+="${raw%\\} "; continue; fi
+		line+=$raw
+		line="${line#"${line%%[![:space:]]*}"}"
+		case $line in
+		"" | \#* | \;*) line=""; continue ;;
+		\[*\]) section=$line; line=""; continue ;;
+		esac
+		key=${line%%=*} val=${line#*=}
+		key=${key%"${key##*[![:space:]]}"} val="${val#"${val%%[![:space:]]*}"}"
+		line=""
+		case "$section:$key" in
+		"[Service]:ExecStart") [[ -n $val ]] && U_EXEC_START+=("$val") || U_EXEC_START=() ;;
+		"[Service]:ExecStartPre") U_EXEC_PRE+=("$val") ;;
+		"[Service]:ExecStop") U_EXEC_STOP+=("$val") ;;
+		"[Service]:Environment") U_ENV+=("$val") ;;
+		"[Service]:EnvironmentFile") U_ENV_FILES+=("$val") ;;
+		"[Service]:Type") U_TYPE=$val ;;
+		"[Service]:Restart") U_RESTART=$val ;;
+		"[Service]:RestartSec") U_RESTART_SEC=${val%s} ;;
+		"[Service]:User") U_USER=$val ;;
+		"[Service]:Group") U_GROUP=$val ;;
+		"[Service]:WorkingDirectory") U_WORKDIR=$val ;;
+		"[Service]:PIDFile") U_PIDFILE=$val ;;
+		"[Service]:RemainAfterExit") U_REMAIN=$val ;;
+		"[Install]:WantedBy" | "[Install]:RequiredBy") read -ra _w <<<"$val"; U_WANTED_BY+=("${_w[@]}") ;;
+		esac
+	done <"$1"
+	[[ $U_RESTART_SEC =~ ^[0-9]+$ ]] || U_RESTART_SEC=1
+	((U_RESTART_SEC < 1)) && U_RESTART_SEC=1
+	return 0
+}
+
+# strip systemd command prefixes (-, @, +, !, :) and report whether a failure
+# should be ignored ("-").
+strip_prefix() {
+	local c=$1
+	IGNORE_FAIL=0
+	while [[ $c == [-@+!:]* ]]; do
+		[[ $c == -* ]] && IGNORE_FAIL=1
+		c=${c:1}
+	done
+	printf '%s' "$c"
+}
+
+# apply_env exports Environment= and EnvironmentFile= values.
+apply_env() {
+	local spec f optional kv
+	for spec in "${U_ENV_FILES[@]}"; do
+		optional=0
+		[[ $spec == -* ]] && optional=1 spec=${spec:1}
+		for f in $spec; do
+			if [[ -r $f ]]; then
+				while IFS= read -r kv || [[ -n $kv ]]; do
+					kv="${kv#"${kv%%[![:space:]]*}"}"
+					[[ -z $kv || $kv == \#* || $kv != *=* ]] && continue
+					kv=${kv#export }
+					local k=${kv%%=*} v=${kv#*=}
+					v=${v#\"} v=${v%\"} v=${v#\'} v=${v%\'}
+					export "$k=$v"
+				done <"$f"
+			elif ((!optional)); then
+				echo "EnvironmentFile $f not found" >&2
+			fi
+		done
+	done
+	for spec in "${U_ENV[@]}"; do
+		while IFS= read -r kv; do
+			[[ $kv == *=* ]] && export "${kv?}"
+		done < <(printf '%s' "$spec" | xargs -n1 printf '%s\n' 2>/dev/null)
+	done
+}
+
+# run_cmd CMD: runs one Exec line as the unit's user in the unit's directory.
+run_cmd() {
+	local cmd
+	cmd=$(strip_prefix "$1")
+	local dir=$U_WORKDIR
+	dir=${dir#-}
+	if [[ $dir == "~" ]]; then
+		dir=$(getent passwd "${U_USER:-root}" | cut -d: -f6)
+	fi
+	(
+		[[ -n $dir ]] && { cd "$dir" 2>/dev/null || echo "WorkingDirectory $dir not found" >&2; }
+		if [[ -n $U_USER && $U_USER != root && $U_USER != 0 ]]; then
+			local g=()
+			[[ -n $U_GROUP ]] && g=(-g "$U_GROUP")
+			exec runuser -u "$U_USER" "${g[@]}" -- /bin/sh -c "exec $cmd"
+		fi
+		exec /bin/sh -c "exec $cmd"
+	)
+}
+
+# ---------------------------------------------------------------- state
+
+pidfile() { printf '%s/%s.pid' "$STATE" "$1"; }
+
+is_running() {
+	local p
+	p=$(cat "$(pidfile "$1")" 2>/dev/null) || return 1
+	[[ -n $p ]] && kill -0 "$p" 2>/dev/null
+}
+
+is_enabled() {
+	compgen -G "$WANTS_DIR/*.wants/$1" >/dev/null ||
+		compgen -G "$HOME/.config/systemd/user/*.wants/$1" >/dev/null
+}
+
+# ---------------------------------------------------------------- actions
+
+supervise() { # runs detached in its own session; pid file = this process
+	local unit=$1 file child code restart pre
+	file=$(find_unit "$unit") || exit 1
+	parse_unit "$file"
+	apply_env
+	echo $$ >"$(pidfile "$unit")"
+	trap 'stopping=1; [[ -n ${child:-} ]] && kill -TERM "$child" 2>/dev/null' TERM INT
+	stopping=0
+	while :; do
+		echo "--- $(date '+%F %T') starting $unit"
+		for pre in "${U_EXEC_PRE[@]}"; do
+			run_cmd "$pre" || { ((IGNORE_FAIL)) || echo "ExecStartPre failed: $pre"; }
+		done
+		run_cmd "${U_EXEC_START[0]}" &
+		child=$!
+		wait "$child"
+		code=$?
+		child=""
+		((stopping)) && break
+		echo "--- $(date '+%F %T') $unit exited with code $code"
+		case $U_RESTART in
+		always) restart=1 ;;
+		on-failure | on-abnormal | on-abort) ((code != 0)) && restart=1 || restart=0 ;;
+		*) restart=0 ;;
+		esac
+		((restart)) || break
+		sleep "$U_RESTART_SEC"
+	done
+	rm -f "$(pidfile "$unit")"
+}
+
+start_unit() {
+	local unit=$1 scope=${2:-} file
+	[[ $unit == *.service ]] || { note "Note: $unit is not a service; nothing to start."; return 0; }
+	file=$(find_unit "$unit" "$scope") || { echo "Failed to start $unit: Unit $unit not found." >&2; return 5; }
+	is_running "$unit" && return 0
+	parse_unit "$file"
+	if ((${#U_EXEC_START[@]} == 0)); then
+		echo "Failed to start $unit: no ExecStart= in $file" >&2
+		return 1
+	fi
+	local log="$LOGS/$unit.log"
+	case $U_TYPE in
+	oneshot)
+		(
+			apply_env
+			local c pre
+			for pre in "${U_EXEC_PRE[@]}"; do run_cmd "$pre"; done
+			for c in "${U_EXEC_START[@]}"; do run_cmd "$c" || exit 1; done
+		) >>"$log" 2>&1 || { echo "Job for $unit failed. See $log" >&2; return 1; }
+		[[ $U_REMAIN == yes || $U_REMAIN == true ]] && echo $$ >"$STATE/$unit.done"
+		;;
+	forking)
+		(apply_env; run_cmd "${U_EXEC_START[0]}") >>"$log" 2>&1 || { echo "Job for $unit failed. See $log" >&2; return 1; }
+		if [[ -n $U_PIDFILE ]]; then
+			for _ in 1 2 3 4 5; do [[ -s $U_PIDFILE ]] && break; sleep 1; done
+			cp "$U_PIDFILE" "$(pidfile "$unit")" 2>/dev/null
+		fi
+		;;
+	*)
+		setsid -f "$SELF" __supervise "$unit" </dev/null >>"$log" 2>&1
+		for _ in 1 2 3 4 5 6 7 8 9 10; do is_running "$unit" && break; sleep 0.2; done
+		;;
+	esac
+	return 0
+}
+
+stop_unit() {
+	local unit=$1 p file
+	rm -f "$STATE/$unit.done"
+	p=$(cat "$(pidfile "$unit")" 2>/dev/null) || return 0
+	if file=$(find_unit "$unit"); then
+		parse_unit "$file"
+		local c
+		for c in "${U_EXEC_STOP[@]}"; do (apply_env; MAINPID=$p run_cmd "$c") >>"$LOGS/$unit.log" 2>&1; done
+	fi
+	kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null
+	for _ in $(seq 1 50); do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
+	kill -KILL -- "-$p" 2>/dev/null
+	rm -f "$(pidfile "$unit")"
+	return 0
+}
+
+enable_unit() {
+	local unit=$1 scope=${2:-} file t base
+	file=$(find_unit "$unit" "$scope") || { echo "Failed to enable unit: Unit file $unit does not exist." >&2; return 1; }
+	parse_unit "$file"
+	((${#U_WANTED_BY[@]})) || U_WANTED_BY=(multi-user.target)
+	base=$WANTS_DIR
+	[[ $scope == user ]] && base="$HOME/.config/systemd/user"
+	for t in "${U_WANTED_BY[@]}"; do
+		mkdir -p "$base/$t.wants"
+		ln -sf "$file" "$base/$t.wants/$unit"
+		note "Created symlink $base/$t.wants/$unit → $file."
+	done
+}
+
+disable_unit() {
+	local unit=$1 l
+	for l in "$WANTS_DIR"/*.wants/"$unit" "$HOME"/.config/systemd/user/*.wants/"$unit"; do
+		[[ -L $l || -e $l ]] && rm -f "$l" && note "Removed \"$l\"."
+	done
+	return 0
+}
+
+status_unit() {
+	local unit=$1 file state="inactive (dead)" en="disabled"
+	file=$(find_unit "$unit") || { echo "Unit $unit could not be found." >&2; return 4; }
+	is_enabled "$unit" && en="enabled"
+	if is_running "$unit"; then
+		state="active (running) since $(date -r "$(pidfile "$unit")" '+%a %F %T')"
+	elif [[ -e "$STATE/$unit.done" ]]; then
+		state="active (exited)"
+	fi
+	printf '● %s\n     Loaded: loaded (%s; %s)\n     Active: %s\n' "$unit" "$file" "$en" "$state"
+	is_running "$unit" && printf '   Main PID: %s (supervised by dockerbox)\n' "$(cat "$(pidfile "$unit")")"
+	if [[ -s "$LOGS/$unit.log" ]]; then
+		echo
+		tail -n 10 "$LOGS/$unit.log"
+	fi
+	is_running "$unit" || [[ -e "$STATE/$unit.done" ]] || return 3
+}
+
+boot() { # start everything that is enabled (called by the box init)
+	local l
+	mkdir -p /run/systemd/system
+	for l in "$WANTS_DIR"/*.wants/*.service "$HOME"/.config/systemd/user/*.wants/*.service; do
+		[[ -e $l ]] || continue
+		start_unit "${l##*/}" && echo "dockerbox: started ${l##*/}"
+	done
+}
+
+# ---------------------------------------------------------------- main
+
+SELF=$(readlink -f "$0")
+QUIET=0 NOW=0 SCOPE=""
+ARGS=()
+while (($#)); do
+	case $1 in
+	--now) NOW=1 ;;
+	--user) SCOPE=user ;;
+	-q | --quiet) QUIET=1 ;;
+	--version) ARGS+=("$1") ;;
+	-t | --type | -p | --property | -n | --lines | -o | --output | -H | --host | -M | --machine) shift ;;
+	-*) ;;
+	*) ARGS+=("$1") ;;
+	esac
+	shift
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+cmd=${1:-list-units}
+shift || true
+
+case $cmd in
+__supervise) supervise "$1" ;;
+__boot) boot ;;
+daemon-reload | daemon-reexec | reset-failed | preset | mask | unmask | link | revert) exit 0 ;;
+start | stop | restart | reload | try-restart | reload-or-restart | try-reload-or-restart | condrestart | enable | disable | reenable | kill)
+	rc=0
+	for u in "$@"; do
+		u=$(normalize "$u")
+		case $cmd in
+		start) start_unit "$u" "$SCOPE" || rc=$? ;;
+		stop) stop_unit "$u" ;;
+		restart | reload | reload-or-restart) stop_unit "$u"; start_unit "$u" "$SCOPE" || rc=$? ;;
+		try-restart | try-reload-or-restart | condrestart) is_running "$u" && { stop_unit "$u"; start_unit "$u" "$SCOPE" || rc=$?; } ;;
+		kill) stop_unit "$u" ;;
+		enable) enable_unit "$u" "$SCOPE" || rc=$?; ((NOW)) && { start_unit "$u" "$SCOPE" || rc=$?; } ;;
+		reenable) disable_unit "$u"; enable_unit "$u" "$SCOPE" || rc=$? ;;
+		disable) disable_unit "$u"; ((NOW)) && stop_unit "$u" ;;
+		esac
+	done
+	exit $rc
+	;;
+status)
+	rc=0
+	for u in "$@"; do status_unit "$(normalize "$u")" || rc=$?; echo; done
+	exit $rc
+	;;
+is-active)
+	rc=0
+	for u in "$@"; do
+		u=$(normalize "$u")
+		if is_running "$u" || [[ -e "$STATE/$u.done" ]]; then echo active; else echo inactive; rc=3; fi
+	done
+	exit $rc
+	;;
+is-enabled)
+	rc=0
+	for u in "$@"; do u=$(normalize "$u"); if is_enabled "$u"; then echo enabled; else echo disabled; rc=1; fi; done
+	exit $rc
+	;;
+is-failed) exit 1 ;;
+is-system-running) echo running ;;
+list-units | list-unit-files)
+	printf '%-40s %s\n' UNIT STATE
+	for f in "$LOGS"/*.log; do
+		[[ -e $f ]] || continue
+		u=${f##*/}; u=${u%.log}
+		if is_running "$u"; then s=running; elif [[ -e "$STATE/$u.done" ]]; then s=exited; else s=dead; fi
+		printf '%-40s %s\n' "$u" "$s"
+	done
+	;;
+show)
+	u=$(normalize "${1:-}")
+	if is_running "$u"; then echo "ActiveState=active"; echo "SubState=running"; elif [[ -e "$STATE/$u.done" ]]; then echo "ActiveState=active"; echo "SubState=exited"; else echo "ActiveState=inactive"; echo "SubState=dead"; fi
+	is_enabled "$u" && echo "UnitFileState=enabled" || echo "UnitFileState=disabled"
+	;;
+--version | -v) echo "systemd 257 (dockerbox compatible replacement)" ;;
+*)
+	echo "dockerbox systemctl: '$cmd' is not supported in a box (no systemd); ignoring." >&2
+	exit 0
+	;;
+esac
