@@ -28,13 +28,16 @@ type Config struct {
 	// the host, independent of the Docker version. On kernels without IPv6 the
 	// sysctl does not exist and must not be set.
 	DisableIPv6 bool
+	// SelfID is the broker's own container ID prefix (its hostname); used to
+	// find the egress proxy of the same compose project.
+	SelfID string
 }
 
 // LoadConfig reads the broker configuration from the environment.
 func LoadConfig(defaultImage string) (*Config, error) {
 	e := envconf.New()
 	c := &Config{
-		Listen:          e.String("DOCKERBOX_BROKER_LISTEN", ":8081"),
+		Listen:          e.String("DOCKERBOX_BROKER_LISTEN", "unix:///run/dockerbox/broker.sock"),
 		DockerSocket:    e.String("DOCKERBOX_DOCKER_SOCKET", "/var/run/docker.sock"),
 		Instance:        e.String("DOCKERBOX_INSTANCE", "default"),
 		AgentImage:      e.String("DOCKERBOX_AGENT_IMAGE", defaultImage),
@@ -48,6 +51,7 @@ func LoadConfig(defaultImage string) (*Config, error) {
 		EgressPort:      e.Int("DOCKERBOX_EGRESS_PORT", 3128),
 		DisableIPv6:     kernelHasIPv6(),
 	}
+	c.SelfID, _ = os.Hostname()
 	if err := e.Err(); err != nil {
 		return nil, err
 	}

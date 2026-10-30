@@ -118,14 +118,17 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 
 // dialTerminal opens an upgraded connection to the broker's terminal endpoint.
 func (s *Server) dialTerminal(ctx context.Context, name string, rows, cols int) (net.Conn, *bufio.Reader, string, error) {
-	host := s.cfg.BrokerURL.Host
-	if s.cfg.BrokerURL.Port() == "" {
-		host = net.JoinHostPort(s.cfg.BrokerURL.Hostname(), "80")
+	network, addr := "unix", s.cfg.BrokerSocket
+	if addr == "" {
+		network, addr = "tcp", s.cfg.BrokerURL.Host
+		if s.cfg.BrokerURL.Port() == "" {
+			addr = net.JoinHostPort(s.cfg.BrokerURL.Hostname(), "80")
+		}
 	}
 	dctx, dcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dcancel()
 	var d net.Dialer
-	conn, err := d.DialContext(dctx, "tcp", host)
+	conn, err := d.DialContext(dctx, network, addr)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("broker unreachable: %w", err)
 	}

@@ -577,3 +577,20 @@ func TestDeleteReportsVolumeFailures(t *testing.T) {
 		t.Fatal("delete must fail when the data could not be removed")
 	}
 }
+
+func TestEgressFoundByComposeLabels(t *testing.T) {
+	svc, f := newTestService()
+	// labels rewritten by the platform: only compose labels remain
+	delete(f.containers, "egress")
+	svc.cfg.SelfID = "abcdef123456"
+	f.containers["broker"] = &fakeContainer{id: "abcdef1234567890", name: "broker", state: "running",
+		spec: &dockerapi.ContainerSpec{Labels: map[string]string{composeService: "broker", composeProject: "dockerbox"}}}
+	f.containers["other-egress"] = &fakeContainer{id: "x1", name: "other-egress", state: "running",
+		spec: &dockerapi.ContainerSpec{Labels: map[string]string{composeService: "egress", composeProject: "someone-else"}}}
+	f.containers["egress"] = &fakeContainer{id: "egress-id", name: "egress", state: "running",
+		spec: &dockerapi.ContainerSpec{Labels: map[string]string{composeService: "egress", composeProject: "dockerbox"}}}
+	id, err := svc.egressContainer(context.Background())
+	if err != nil || id != "egress-id" {
+		t.Fatalf("egress = %q, %v; want egress-id of the own project", id, err)
+	}
+}

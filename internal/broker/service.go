@@ -9,6 +9,7 @@ import (
 	"net"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -548,18 +549,58 @@ func (s *Service) ensureImage(ctx context.Context) error {
 	return nil
 }
 
-// egressContainer returns the ID of the running egress proxy of this instance.
+const (
+	composeProject = "com.docker.compose.project"
+	composeService = "com.docker.compose.service"
+)
+
+// egressContainer returns the ID of the running egress proxy of this
+// instance: by the dockerbox labels, or else as the "egress" service of the
+// broker's own compose project (some platforms, e.g. ZimaOS, rewrite labels).
 func (s *Service) egressContainer(ctx context.Context) (string, error) {
 	cs, err := s.engine.ContainerList(ctx, []string{LabelRole + "=" + RoleEgress, LabelInstance + "=" + s.cfg.Instance})
 	if err != nil {
 		return "", err
 	}
-	for _, c := range cs {
-		if c.State == "running" {
-			return c.ID, nil
+	if id := firstRunning(cs); id != "" {
+		return id, nil
+	}
+	if project := s.ownProject(ctx); project != "" {
+		cs, err := s.engine.ContainerList(ctx, []string{composeProject + "=" + project, composeService + "=egress"})
+		if err != nil {
+			return "", err
+		}
+		if id := firstRunning(cs); id != "" {
+			return id, nil
 		}
 	}
 	return "", ErrNoEgress
+}
+
+func firstRunning(cs []dockerapi.ContainerSummary) string {
+	for _, c := range cs {
+		if c.State == "running" {
+			return c.ID
+		}
+	}
+	return ""
+}
+
+// ownProject returns the compose project of the broker's own container.
+func (s *Service) ownProject(ctx context.Context) string {
+	if len(s.cfg.SelfID) < 12 {
+		return ""
+	}
+	cs, err := s.engine.ContainerList(ctx, []string{composeService + "=broker"})
+	if err != nil {
+		return ""
+	}
+	for _, c := range cs {
+		if strings.HasPrefix(c.ID, s.cfg.SelfID) {
+			return c.Labels[composeProject]
+		}
+	}
+	return ""
 }
 
 // ensureNetwork makes sure the isolated network of an agent exists (creating

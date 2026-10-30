@@ -4,6 +4,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"io"
@@ -26,6 +27,7 @@ var agentNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}$`)
 // Config holds the web settings.
 type Config struct {
 	BrokerURL    *url.URL
+	BrokerSocket string // if set, the broker is reached over this unix socket
 	SessionTTL   time.Duration
 	SecureCookie string // "auto", "true" or "false"
 }
@@ -51,7 +53,7 @@ func NewServer(cfg Config, auth *Auth, settings *SettingsStore, log *slog.Logger
 	return &Server{
 		cfg: cfg, auth: auth, settings: settings, log: log,
 		limiter: newLoginLimiter(10, 15*time.Minute),
-		broker:  &http.Client{Timeout: 16 * time.Minute},
+		broker:  &http.Client{Timeout: 16 * time.Minute, Transport: brokerTransport(cfg.BrokerSocket)},
 		static:  http.FileServerFS(sub),
 		now:     time.Now,
 	}
@@ -77,6 +79,22 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agents/{name}/{action}", s.protect(s.withAgent(s.forwardAction)))
 	mux.Handle("GET /api/agents/{name}/terminal", s.protect(s.withAgent(s.terminal)))
 	return securityHeaders(mux)
+}
+
+// brokerTransport returns the HTTP transport to the broker: a unix socket when
+// configured, the default transport otherwise.
+func brokerTransport(socket string) http.RoundTripper {
+	if socket == "" {
+		return http.DefaultTransport
+	}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socket)
+		},
+		MaxIdleConns:    8,
+		IdleConnTimeout: 30 * time.Second,
+	}
 }
 
 func securityHeaders(next http.Handler) http.Handler {

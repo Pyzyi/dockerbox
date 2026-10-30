@@ -22,7 +22,7 @@ settings.
 | | | If neither is set, a 24-character password is generated, stored in `/data/password` and logged once. |
 | `DOCKERBOX_SESSION_TTL` | `24h` | Session lifetime (Go duration, e.g. `8h`). Changing the password invalidates all sessions; logging out revokes the session and closes its open consoles within 30 s. |
 | `DOCKERBOX_SECURE_COOKIE` | `auto` | `auto` sets the `Secure` flag when served over HTTPS (also via `X-Forwarded-Proto`); `true`/`false` to force. |
-| `DOCKERBOX_BROKER_URL` | `http://broker:8081` | Broker address on the internal control network. |
+| `DOCKERBOX_BROKER_URL` | `unix:///run/dockerbox/broker.sock` | How web reaches the broker: a unix socket in a volume shared only by web and broker (or `http://host:port`). |
 | `DOCKERBOX_LISTEN` | `:8080` | Listen address inside the container. |
 | `DOCKERBOX_DATA_DIR` | `/data` | Where the generated password and session key are stored. |
 
@@ -41,7 +41,7 @@ settings.
 | `DOCKERBOX_INSTANCE` | `default` | Separates several Dockerbox installations on one host (labels and object names, e.g. `dockerbox_lab_agent-x`). Must match the `dockerbox.instance` label of the `egress` service. |
 | `DOCKERBOX_EGRESS_PORT` | `3128` | Port of the egress proxy as seen from the boxes. |
 | `DOCKERBOX_DOCKER_SOCKET` | `/var/run/docker.sock` | Docker Engine socket. |
-| `DOCKERBOX_BROKER_LISTEN` | `:8081` | Listen address of the broker on the control network. |
+| `DOCKERBOX_BROKER_LISTEN` | `unix:///run/dockerbox/broker.sock` | Where the broker listens (unix socket, or `:8081` for TCP). |
 
 `DOCKERBOX_MAX_CPUS` / `DOCKERBOX_DEFAULT_CPUS` are lowered automatically to the
 host's CPU count. The broker logs a warning on Docker Engine versions older than 26.

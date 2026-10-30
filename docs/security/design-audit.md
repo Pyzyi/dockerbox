@@ -77,7 +77,7 @@ All findings below were fixed with tests unless marked as documented.
 
 | # | Severity | Finding | Resolution |
 |---|----------|---------|------------|
-| P1 | Medium | Host-network processes could reach the unauthenticated broker API via the `control` bridge gateway. | `inhibit_ipv4` on `control`; integration test dials the broker from the host. |
+| P1 | Medium | Host-network processes could reach the unauthenticated broker API via the `control` bridge gateway. | Broker has no network port (unix socket, see Z3); integration test dials the broker from the host. |
 | P2 | Medium | One box could exhaust all proxy slots (no per-client cap, no idle timeout). | Per-box cap, tunnel idle timeout. |
 | P3 | Medium | Allow-list entries opened every port of a LAN host (e.g. the ZimaOS host itself). | `ADDR:PORT` entries, optional port allow-list, docs warn. |
 | P4 | Medium | Recreate parked the old container under a name inside the agent name space; leftovers blocked recreate and kept "deleted" data. | Park name with `.`; leftovers removed by recreate/delete; volume removal errors reported. |
@@ -98,6 +98,8 @@ All findings below were fixed with tests unless marked as documented.
 |---|----------|---------|------------|
 | Z1 | High (availability) | ZimaOS rejected `${VAR:-default}` in the compose file. | Literal compose values; CI rejects interpolation. |
 | Z2 | High (availability) | ZimaOS creates volume directories as `root:root`; the non-root dashboard could not write `/data`. | Start as root with `CHOWN`/`SETUID`/`SETGID` only, take ownership of `/data`, drop to uid 65532 with no capabilities; reproduced and tested with a root-owned host directory. |
+
+| Z3 | High (availability) | ZimaOS did not connect `web` and `broker` through the custom compose network ("broker unreachable"). | Unix socket in a shared volume instead of a network; no custom networks in the compose file; egress lookup also via compose service labels. |
 
 ## Performance review (ZimaBoard 2, N150, 8–16 GiB)
 

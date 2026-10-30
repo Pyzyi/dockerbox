@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -81,9 +82,39 @@ func newLogger() *slog.Logger {
 }
 
 // serve runs srv until ctx is cancelled, then shuts down gracefully.
+// listen opens a TCP address (":8080") or a unix socket ("unix:///path").
+// Unix sockets replace a stale file from a previous run and are made
+// connectable for the unprivileged web user; access is limited by the
+// volume that holds them.
+func listen(addr string) (net.Listener, error) {
+	path, ok := strings.CutPrefix(addr, "unix://")
+	if !ok {
+		return net.Listen("tcp", addr)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		l.Close()
+		return nil, err
+	}
+	return l, nil
+}
+
 func serve(ctx context.Context, srv *http.Server, log *slog.Logger) error {
+	l, err := listen(srv.Addr)
+	if err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
+	go func() { errc <- srv.Serve(l) }()
 	log.Info("listening", "addr", srv.Addr, "version", version)
 	select {
 	case err := <-errc:
@@ -92,7 +123,7 @@ func serve(ctx context.Context, srv *http.Server, log *slog.Logger) error {
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := srv.Shutdown(sctx)
+	err = srv.Shutdown(sctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return srv.Close()
 	}
@@ -153,7 +184,7 @@ func atoiOr(s string, def int) int {
 func runWeb(ctx context.Context, log *slog.Logger) error {
 	e := envconf.New()
 	listen := e.String("DOCKERBOX_LISTEN", ":8080")
-	brokerURL := e.String("DOCKERBOX_BROKER_URL", "http://broker:8081")
+	brokerURL := e.String("DOCKERBOX_BROKER_URL", "unix:///run/dockerbox/broker.sock")
 	dataDir := e.String("DOCKERBOX_DATA_DIR", "/data")
 	ttl := e.Duration("DOCKERBOX_SESSION_TTL", 24*time.Hour)
 	secure := e.String("DOCKERBOX_SECURE_COOKIE", "auto")
@@ -164,8 +195,15 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("DOCKERBOX_SECURE_COOKIE %q must be auto, true or false", secure)
 	}
 	u, err := url.Parse(brokerURL)
-	if err != nil || u.Scheme != "http" || u.Host == "" {
-		return fmt.Errorf("DOCKERBOX_BROKER_URL %q must be http://host:port", brokerURL)
+	var brokerSocket string
+	switch {
+	case err == nil && u.Scheme == "unix" && u.Path != "":
+		// No network between web and broker: platforms like ZimaOS do not
+		// reliably connect services through custom compose networks.
+		brokerSocket, u = u.Path, &url.URL{Scheme: "http", Host: "broker"}
+	case err == nil && u.Scheme == "http" && u.Host != "":
+	default:
+		return fmt.Errorf("DOCKERBOX_BROKER_URL %q must be unix:///path or http://host:port", brokerURL)
 	}
 	log = log.With("svc", "web")
 	if os.Geteuid() == 0 {
@@ -199,7 +237,7 @@ func runWeb(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv := web.NewServer(web.Config{BrokerURL: u, SessionTTL: ttl, SecureCookie: secure}, auth, settings, log)
+	srv := web.NewServer(web.Config{BrokerURL: u, BrokerSocket: brokerSocket, SessionTTL: ttl, SecureCookie: secure}, auth, settings, log)
 	return serve(ctx, &http.Server{
 		Addr: listen, Handler: srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
@@ -250,6 +288,22 @@ func healthcheck(args []string) error {
 		return err
 	}
 	switch u.Scheme {
+	case "unix":
+		client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", u.Path)
+			},
+		}}
+		resp, err := client.Get("http://local/healthz")
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			return fmt.Errorf("unhealthy: %s", resp.Status)
+		}
+		return nil
 	case "tcp":
 		c, err := net.DialTimeout("tcp", u.Host, 3*time.Second)
 		if err != nil {

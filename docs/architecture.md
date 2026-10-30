@@ -30,7 +30,7 @@ flowchart LR
         egress["egress<br/>HTTP/CONNECT proxy<br/>blocks private ranges"]
     end
 
-    web -- "control network<br/>(internal)" --> broker
+    web -- "unix socket<br/>(shared volume)" --> broker
     broker -- "/var/run/docker.sock" --> dockerd[(Docker Engine)]
 
     subgraph agents["per-agent isolated networks (internal, no host IP)"]
@@ -58,8 +58,8 @@ flowchart LR
 ### `broker`
 
 * The only component with access to `/var/run/docker.sock`.
-* Not reachable from the browser or from agents (lives on an `internal`
-  network shared with `web` only).
+* Not reachable from the browser, the network or agents: it has no network
+  port and is reached by `web` over a unix socket in a shared volume.
 * Does **not** forward raw Docker API calls. It builds every container, network
   and volume definition itself from a fixed template and validates the result
   against an explicit policy (`internal/broker/policy.go`) before sending it to
@@ -111,7 +111,7 @@ Defense in depth, from outside to inside:
 ### Create agent
 
 1. Browser `POST /api/agents {name, memoryMB, cpus}` with session cookie + CSRF header.
-2. `web` authenticates and forwards to `broker` `POST /v1/agents`.
+2. `web` authenticates and forwards to `broker` `POST /v1/agents` (unix socket).
 3. `broker` validates input, pulls the agent image if missing, creates
    `dockerbox-net-<name>` (internal, isolated), attaches the egress proxy with alias
    `dockerbox-egress`, builds the container spec, validates it against the policy,

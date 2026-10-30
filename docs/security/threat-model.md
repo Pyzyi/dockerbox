@@ -50,7 +50,7 @@ Browser ──(B1)── web ──(B2)── broker ──(B3)── Docker Eng
 | D1 | host | Box exhausts RAM/CPU/PIDs/disk logs | Memory (no swap), CPU and PID limits, log rotation | policy tests |
 | D2 | B4 | Box floods proxy and starves other boxes | Global and per-box connection limits, idle timeout for tunnels, optional port allow-list | `internal/egress/proxy_test.go` |
 | E4 | B1 | Dashboard (`web`) runs with privileges | Starts as root only to `chown` its own data directory (no symlink following), then drops to uid 65532 with an empty capability set before serving any request | integration test `TestWebRunsUnprivilegedAndOwnsData` (`/proc` UID/GID and `CapEff`) |
-| E3 | B2 | Process in the host network namespace (e.g. another app with `network_mode: host`) drives the unauthenticated broker API | `control` network with `inhibit_ipv4`: the host has no address or route on it | integration test `TestBrokerNotReachableFromOutside` |
+| E3 | B2 | Another process (e.g. an app with `network_mode: host`) drives the unauthenticated broker API | The broker has no network port: web reaches it over a unix socket in a volume shared only by web and broker | integration test `TestBrokerNotReachableFromOutside` |
 | R1 | all | No trace of admin actions | Structured JSON logs for create/start/stop/delete and denied egress | review |
 | I4 | repo | Personal data / secrets in the public repo | `.gitignore`, no defaults containing secrets, CI secret scan (gitleaks) | CI |
 | T2 | build | Supply chain (T4) | Minimal deps, lockfiles, actions pinned by SHA, CodeQL, govulncheck, Trivy image scan, SBOM + provenance on release | CI |
@@ -60,7 +60,7 @@ Browser ──(B1)── web ──(B2)── broker ──(B3)── Docker Eng
 * **Kernel vulnerabilities**: shared kernel is inherent to containers. Mitigation is
   keeping ZimaOS updated and optionally using gVisor.
 * **Broker compromise**: equals host root. Kept minimal, reachable only from `web`
-  over an isolated network (not even from the host network namespace).
+  through a unix socket (no network port).
 * **Disk usage**: boxes have no disk quota (overlay2 quotas need xfs with project
   quotas). A malicious agent can fill the Docker data disk. Documented; monitor
   free space.

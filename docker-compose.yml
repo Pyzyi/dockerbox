@@ -16,7 +16,7 @@ name: dockerbox
 
 services:
   web:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.0
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.1
     command: ["web"]
     restart: unless-stopped
     depends_on:
@@ -30,16 +30,18 @@ services:
       # Dashboard password, at least 12 characters. Leave empty to generate one
       # on first start; it is printed once in the log of this container.
       DOCKERBOX_PASSWORD: ""
-      DOCKERBOX_BROKER_URL: http://broker:8081
+      # web talks to the broker over a unix socket in a shared volume, not over
+      # a network: nothing but web can reach the broker.
+      DOCKERBOX_BROKER_URL: unix:///run/dockerbox/broker.sock
       DOCKERBOX_SESSION_TTL: 24h
       TZ: UTC
     volumes:
       - type: volume
         source: data
         target: /data
-    networks:
-      - frontend
-      - control
+      - type: volume
+        source: broker-socket
+        target: /run/dockerbox
     # Starts as root only to take ownership of /data (ZimaOS creates volume
     # directories as root:root), then permanently switches to uid 65532 and
     # loses these capabilities. The dashboard never runs as root.
@@ -86,11 +88,14 @@ services:
             de_de: Dashboard-Passwort, Sitzungsschlüssel und Darstellungs-Einstellungen
 
   broker:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.0
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.1
     command: ["broker"]
     restart: unless-stopped
+    depends_on:
+      egress:
+        condition: service_started
     environment:
-      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.0
+      DOCKERBOX_AGENT_IMAGE: ghcr.io/pyzyi/dockerbox-agentbox:1.0.1
       # Optional: "runsc" (gVisor) or "sysbox-runc" if installed on the host.
       DOCKERBOX_AGENT_RUNTIME: ""
       DOCKERBOX_MAX_AGENTS: "10"
@@ -99,14 +104,16 @@ services:
       DOCKERBOX_DEFAULT_CPUS: "2"
       DOCKERBOX_MAX_CPUS: "4"
       DOCKERBOX_INSTANCE: default
+      DOCKERBOX_BROKER_LISTEN: unix:///run/dockerbox/broker.sock
     volumes:
       # The ONLY component with Docker access. Not reachable from the browser,
       # the host network or agent boxes (internal network shared with web only).
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
-    networks:
-      - control
+      - type: volume
+        source: broker-socket
+        target: /run/dockerbox
     # Runs as UID 0 solely to open the root-owned socket; all capabilities dropped.
     user: "0:0"
     read_only: true
@@ -115,7 +122,7 @@ services:
     mem_limit: 64m
     pids_limit: 64
     healthcheck:
-      test: ["CMD", "/dockerbox", "healthcheck", "http://127.0.0.1:8081/healthz"]
+      test: ["CMD", "/dockerbox", "healthcheck", "unix:///run/dockerbox/broker.sock"]
       interval: 30s
       timeout: 5s
       start_period: 10s
@@ -144,7 +151,7 @@ services:
             de_de: Maximale CPU-Kerne pro Agenten-Box
 
   egress:
-    image: ghcr.io/pyzyi/dockerbox-core:1.0.0
+    image: ghcr.io/pyzyi/dockerbox-core:1.0.1
     command: ["egress"]
     restart: unless-stopped
     environment:
@@ -157,8 +164,6 @@ services:
       # Comma-separated public addresses agents must NOT reach, e.g. this
       # server's own public/WAN IP on a VPS or with NAT hairpinning.
       DOCKERBOX_EGRESS_DENY_CIDRS: ""
-    networks:
-      - egress
     # Agent networks are attached at runtime by the broker.
     user: "65532:65532"
     read_only: true
@@ -188,19 +193,9 @@ services:
             en_us: "LAN services agents may reach, as ADDR:PORT (e.g. 192.168.1.50:11434). Empty = Internet only."
             de_de: "LAN-Dienste, die Agenten erreichen dürfen, als ADRESSE:PORT (z. B. 192.168.1.50:11434). Leer = nur Internet."
 
-networks:
-  frontend: {}
-  control:
-    # web <-> broker only. inhibit_ipv4 gives the host no address on this
-    # bridge, so processes in the host network namespace (e.g. other apps
-    # using network_mode: host) cannot reach the broker API either.
-    internal: true
-    driver_opts:
-      com.docker.network.bridge.inhibit_ipv4: "true"
-  egress: {}
-
 volumes:
   data: {}
+  broker-socket: {}
 
 x-casaos:
   architectures:
